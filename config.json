@@ -1,0 +1,11 @@
+{
+  "recycleBinPath": "/mnt/recycle-bin",
+  "backupPath": "/mnt/backup",
+  "monitoring": {
+    "enabled": true,
+    "paths": [
+      "/path/to/important-file.txt",
+      "/path/to/another-file.txt"
+    ]
+  }
+}
