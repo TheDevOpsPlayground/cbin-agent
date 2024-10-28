@@ -1,13 +1,17 @@
 const fs = require('fs-extra');
-const path = require('path');
 
-async function moveFile(file, destination) {
+/**
+ * Move a file from source to destination.
+ * @param {string} src - Source file path.
+ * @param {string} dest - Destination file path.
+ */
+async function moveFile(src, dest) {
   try {
-    const destPath = path.join(destination, path.basename(file));
-    await fs.move(file, destPath, { overwrite: true });
-    console.log(`Moved ${file} to ${destPath}`);
+    await fs.move(src, dest, { overwrite: true });
+    console.log(`Moved ${src} to ${dest}`);
   } catch (error) {
-    console.error(`Error moving file: ${error.message}`);
+    console.error(`Failed to move ${src}: ${error.message}`);
+    throw error;
   }
 }
 
