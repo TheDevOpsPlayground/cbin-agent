@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/natefinch/lumberjack"
 )
 
 type Config struct {
@@ -44,6 +46,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to read configuration file: %v", err)
 	}
+
+	// Set up logging with log rotation
+	log.SetOutput(&lumberjack.Logger{
+		Filename:   "/var/log/recycler-cli.log",
+		MaxSize:    10, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28, // days
+	})
 
 	// Get server's private IP and hostname
 	ip, hostname, err := getServerInfo()
