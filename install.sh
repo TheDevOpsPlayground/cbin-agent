@@ -5,72 +5,69 @@ INSTALL_DIR="/opt/recycler-cli"
 BIN_PATH="/usr/local/bin/recycler-cli"
 CONFIG_DIR="/etc/recycler-cli"
 LOG_DIR="/var/log/recycler-cli"
-CONFIG_FILE="$CONFIG_DIR/config.conf"
+RECYCLE_BIN_DIR="/mnt/recycle-bin"
 SYSTEMD_FILE="/etc/systemd/system/recycler-cli.service"
 
-# Create directories
-echo "Creating necessary directories..."
-sudo mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
+# Create necessary directories
+echo "Creating installation directories..."
+sudo mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$RECYCLE_BIN_DIR"
 
-# Download the binary from GitHub
+# Download binary from GitHub and place it in the installation directory
 echo "Downloading recycler-cli binary..."
-curl -L -o "$INSTALL_DIR/recycler-cli" "https://github.com/Toymakerftw/recycler/raw/refs/heads/go/recycler-cli"
-
-# Set permissions
-echo "Setting permissions..."
+sudo curl -L "https://github.com/Toymakerftw/recycler/raw/refs/heads/go/recycler-cli" -o "$INSTALL_DIR/recycler-cli"
 sudo chmod +x "$INSTALL_DIR/recycler-cli"
-sudo chown -R root:root "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
 
-# Create symbolic link to make globally accessible
-echo "Linking binary to /usr/local/bin..."
+# Create symbolic link to make it globally accessible
+echo "Creating symbolic link for global access..."
 sudo ln -sf "$INSTALL_DIR/recycler-cli" "$BIN_PATH"
 
-# Copy configuration file (create a default one if not exists)
-if [ ! -f "$CONFIG_FILE" ]; then
-  echo "Creating default configuration..."
-  echo -e "{\n  \"recycleBinDir\": \"/mnt/recycle-bin\",\n  \"numWorkers\": 4\n}" | sudo tee "$CONFIG_FILE" > /dev/null
-fi
+# Set up default configuration file
+echo "Setting up default configuration file..."
+cat <<EOL | sudo tee "$CONFIG_DIR/config.conf" > /dev/null
+{
+  "recycleBinDir": "$RECYCLE_BIN_DIR",
+  "numWorkers": 4
+}
+EOL
 
-# Create systemd service file
+# Adjust ownership and permissions for the log and recycle bin directories
+echo "Adjusting permissions for log and recycle bin directories..."
+sudo chown -R "$USER":"$USER" "$LOG_DIR" "$RECYCLE_BIN_DIR"
+sudo chmod 755 "$LOG_DIR" "$RECYCLE_BIN_DIR"
+
+# Set up systemd service for background running (optional)
 echo "Creating systemd service..."
-sudo bash -c "cat > $SYSTEMD_FILE" <<EOF
+cat <<EOL | sudo tee "$SYSTEMD_FILE" > /dev/null
 [Unit]
 Description=Recycler CLI Service
 After=network.target
 
 [Service]
-Type=simple
-ExecStart=$INSTALL_DIR/recycler-cli
+ExecStart=$BIN_PATH
+User=$USER
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
-# Reload systemd and start the service
-echo "Enabling and starting recycler-cli service..."
+# Reload systemd, enable and start the service
 sudo systemctl daemon-reload
-sudo systemctl enable recycler-cli.service
-sudo systemctl start recycler-cli.service
+sudo systemctl enable recycler-cli
+sudo systemctl start recycler-cli
 
-echo "Installation complete. Recycler CLI is ready to use."
-
-# Inform the user about configuration and log file locations
-echo "----------------------------------------"
-echo "Recycler CLI has been installed successfully!"
-echo
-echo "Configuration file: $CONFIG_FILE"
-echo "Log file: $LOG_DIR/recycler-cli.log"
-echo
-echo "Usage:"
-echo "  To recycle files, use:"
-echo "      recycler-cli -f file1.txt,file2.log"
-echo
-echo "Options:"
-echo "  -f, --files   Comma-separated list of files to recycle (e.g., file1.txt,file2.log)"
-echo "  -h, --help    Display help message"
-echo
-echo "Example:"
-echo "  recycler-cli -f file1.txt,file2.log,file3.pdf"
-echo
-echo "----------------------------------------"
+# Display configuration and log file locations, along with usage information
+echo -e "\nInstallation Complete!"
+echo -e "---------------------------------------------------------------"
+echo -e "Recycler CLI is now installed and globally accessible as 'recycler-cli'"
+echo -e "Default Configuration File: $CONFIG_DIR/config.conf"
+echo -e "Log File: $LOG_DIR/recycler-cli.log"
+echo -e "Recycle Bin Directory: $RECYCLE_BIN_DIR"
+echo -e "---------------------------------------------------------------"
+echo -e "Usage:"
+echo -e "  recycler-cli -f <file1,file2,...>     # Move specified files to recycle bin"
+echo -e "  recycler-cli -h                       # Display help message"
+echo -e "Example:"
+echo -e "  recycler-cli -f file1.txt,file2.log"
+echo -e "---------------------------------------------------------------"
+echo -e "The tool will automatically recycle the specified files to the configured directory.\n"
