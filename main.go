@@ -49,7 +49,7 @@ func main() {
 
 	// Set up logging with log rotation
 	logrus.SetOutput(&lumberjack.Logger{
-		Filename:   "/var/log/recycler-cli.log",
+		Filename:   "/var/log/recycler-cli/recycler-cli.log",
 		MaxSize:    10, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, // days
