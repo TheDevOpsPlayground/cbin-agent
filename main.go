@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,11 +12,10 @@ import (
 	"sync"
 )
 
-const (
-	// *** Ensure this is set to a valid path on your system ***
-	recycleBinDir = "/home/cv/recycler-go/recycle-bin"
-	numWorkers    = 4 // Number of concurrent workers
-)
+type Config struct {
+	RecycleBinDir string `json:"recycleBinDir"`
+	NumWorkers    int    `json:"numWorkers"`
+}
 
 func main() {
 	// Define flags
@@ -36,11 +37,17 @@ func main() {
 		return
 	}
 
+	// Read configuration from file
+	config, err := readConfig("/etc/recycler-cli/config.conf")
+	if err != nil {
+		log.Fatalf("Failed to read configuration file: %v", err)
+	}
+
 	// Split comma-separated files into a slice
 	fileSlice := strings.Split(*files, ",")
 
 	// Ensure recycle bin directory exists
-	err := os.MkdirAll(recycleBinDir, os.ModePerm)
+	err = os.MkdirAll(config.RecycleBinDir, os.ModePerm)
 	if err != nil {
 		log.Fatalf("Failed to ensure recycle bin directory exists: %v", err)
 	}
@@ -56,12 +63,12 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Start worker goroutines
-	for i := 0; i < numWorkers; i++ {
+	for i := 0; i < config.NumWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				moveFileToRecycleBin(file)
+				moveFileToRecycleBin(file, config.RecycleBinDir)
 			}
 		}()
 	}
@@ -71,7 +78,7 @@ func main() {
 	log.Println("All specified files have been recycled.")
 }
 
-func moveFileToRecycleBin(file string) {
+func moveFileToRecycleBin(file string, recycleBinDir string) {
 	// Check if file exists
 	fileInfo, err := os.Stat(file)
 	if err != nil {
@@ -105,6 +112,19 @@ func moveFileToRecycleBin(file string) {
 		return
 	}
 	log.Printf("%s successfully moved to recycle bin.\n", file)
+}
+
+func readConfig(filePath string) (Config, error) {
+	var config Config
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return config, err
+	}
+	err = json.Unmarshal(data, &config)
+	if err != nil {
+		return config, err
+	}
+	return config, nil
 }
 
 func printHelp() {
