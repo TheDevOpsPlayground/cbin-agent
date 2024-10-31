@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -43,14 +45,21 @@ func main() {
 		log.Fatalf("Failed to read configuration file: %v", err)
 	}
 
+	// Get server's private IP and hostname
+	ip, hostname, err := getServerInfo()
+	if err != nil {
+		log.Fatalf("Failed to get server information: %v", err)
+	}
+
+	// Create unique directory for the server
+	serverDir := filepath.Join(config.RecycleBinDir, fmt.Sprintf("%s_%s", ip, hostname))
+	err = os.MkdirAll(serverDir, os.ModePerm)
+	if err != nil {
+		log.Fatalf("Failed to create server directory: %v", err)
+	}
+
 	// Split comma-separated files into a slice
 	fileSlice := strings.Split(*files, ",")
-
-	// Ensure recycle bin directory exists
-	err = os.MkdirAll(config.RecycleBinDir, os.ModePerm)
-	if err != nil {
-		log.Fatalf("Failed to ensure recycle bin directory exists: %v", err)
-	}
 
 	// Create a channel to send file paths to workers
 	fileChan := make(chan string, len(fileSlice))
@@ -68,7 +77,7 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				moveFileToRecycleBin(file, config.RecycleBinDir)
+				moveFileToRecycleBin(file, serverDir)
 			}
 		}()
 	}
@@ -78,7 +87,7 @@ func main() {
 	log.Println("All specified files have been recycled.")
 }
 
-func moveFileToRecycleBin(file string, recycleBinDir string) {
+func moveFileToRecycleBin(file string, serverDir string) {
 	// Check if file exists
 	fileInfo, err := os.Stat(file)
 	if err != nil {
@@ -90,18 +99,18 @@ func moveFileToRecycleBin(file string, recycleBinDir string) {
 		return
 	}
 
-	// Construct destination path
-	destPath := filepath.Join(recycleBinDir, fileInfo.Name())
-
-	// Check for conflicts in the recycle bin
-	counter := 1
-	for {
-		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			break
-		}
-		destPath = filepath.Join(recycleBinDir, fmt.Sprintf("%s_%d", fileInfo.Name(), counter))
-		counter++
+	// Get current date and time
+	now := time.Now()
+	dateDir := filepath.Join(serverDir, now.Format("2006-01-02"))
+	err = os.MkdirAll(dateDir, os.ModePerm)
+	if err != nil {
+		log.Printf("Failed to create date directory: %v", err)
+		return
 	}
+
+	// Construct destination path with timestamp
+	timestamp := now.Format("15:04:05")
+	destPath := filepath.Join(dateDir, fmt.Sprintf("%s_%s%s", fileInfo.Name(), timestamp, filepath.Ext(file)))
 
 	// Move file to recycle bin
 	log.Printf("Moving %s to %s...\n", file, destPath)
@@ -125,6 +134,33 @@ func readConfig(filePath string) (Config, error) {
 		return config, err
 	}
 	return config, nil
+}
+
+func getServerInfo() (string, string, error) {
+	// Get server's private IP
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", "", err
+	}
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			return "", "", err
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if !ip.IsLoopback() && ip.To4() != nil {
+				return ip.String(), "", nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("no private IP found")
 }
 
 func printHelp() {
