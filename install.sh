@@ -57,7 +57,20 @@ echo "Installation complete. Recycler CLI is ready to use."
 
 # Inform the user about configuration and log file locations
 echo "----------------------------------------"
-echo "Recycler CLI has been installed."
-echo "Configuration file is located at: $CONFIG_FILE"
-echo "Log file can be found at: $LOG_DIR/recycler-cli.log"
+echo "Recycler CLI has been installed successfully!"
+echo
+echo "Configuration file: $CONFIG_FILE"
+echo "Log file: $LOG_DIR/recycler-cli.log"
+echo
+echo "Usage:"
+echo "  To recycle files, use:"
+echo "      recycler-cli -f file1.txt,file2.log"
+echo
+echo "Options:"
+echo "  -f, --files   Comma-separated list of files to recycle (e.g., file1.txt,file2.log)"
+echo "  -h, --help    Display help message"
+echo
+echo "Example:"
+echo "  recycler-cli -f file1.txt,file2.log,file3.pdf"
+echo
 echo "----------------------------------------"
