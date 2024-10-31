@@ -192,7 +192,11 @@ func getServerInfo() (string, string, error) {
 				ip = v.IP
 			}
 			if !ip.IsLoopback() && ip.To4() != nil {
-				return ip.String(), "", nil
+				hostname, err := os.Hostname()
+				if err != nil {
+					return "", "", err
+				}
+				return ip.String(), hostname, nil
 			}
 		}
 	}
