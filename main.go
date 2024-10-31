@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/natefinch/lumberjack"
+	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
@@ -36,7 +36,7 @@ func main() {
 
 	// Check if files flag is provided
 	if *files == "" {
-		log.Println("Please specify files to recycle using -f.")
+		logrus.Info("Please specify files to recycle using -f.")
 		printHelp()
 		return
 	}
@@ -44,28 +44,30 @@ func main() {
 	// Read configuration from file
 	config, err := readConfig("/etc/recycler-cli/config.conf")
 	if err != nil {
-		log.Fatalf("Failed to read configuration file: %v", err)
+		logrus.Fatalf("Failed to read configuration file: %v", err)
 	}
 
 	// Set up logging with log rotation
-	log.SetOutput(&lumberjack.Logger{
+	logrus.SetOutput(&lumberjack.Logger{
 		Filename:   "/var/log/recycler-cli.log",
 		MaxSize:    10, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, // days
 	})
+	logrus.SetFormatter(&logrus.JSONFormatter{})
+	logrus.SetLevel(logrus.InfoLevel)
 
 	// Get server's private IP and hostname
 	ip, hostname, err := getServerInfo()
 	if err != nil {
-		log.Fatalf("Failed to get server information: %v", err)
+		logrus.Fatalf("Failed to get server information: %v", err)
 	}
 
 	// Create unique directory for the server
 	serverDir := filepath.Join(config.RecycleBinDir, fmt.Sprintf("%s_%s", ip, hostname))
 	err = os.MkdirAll(serverDir, os.ModePerm)
 	if err != nil {
-		log.Fatalf("Failed to create server directory: %v", err)
+		logrus.Fatalf("Failed to create server directory: %v", err)
 	}
 
 	// Split comma-separated files into a slice
@@ -87,24 +89,31 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
-				moveFileToRecycleBin(file, serverDir)
+				moveFileToRecycleBin(file, serverDir, ip, hostname)
 			}
 		}()
 	}
 
 	// Wait for all workers to finish
 	wg.Wait()
-	log.Println("All specified files have been recycled.")
+	logrus.Info("All specified files have been recycled.")
 }
 
-func moveFileToRecycleBin(file string, serverDir string) {
+func moveFileToRecycleBin(file string, serverDir string, ip string, hostname string) {
 	// Check if file exists
 	fileInfo, err := os.Stat(file)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("Skipping non-existent file: %s\n", file)
+			logrus.WithFields(logrus.Fields{
+				"file":   file,
+				"server": fmt.Sprintf("%s_%s", ip, hostname),
+			}).Info("Skipping non-existent file")
 		} else {
-			log.Printf("Error checking existence of %s: %v\n", file, err)
+			logrus.WithFields(logrus.Fields{
+				"file":   file,
+				"server": fmt.Sprintf("%s_%s", ip, hostname),
+				"error":  err,
+			}).Error("Error checking existence of file")
 		}
 		return
 	}
@@ -114,7 +123,11 @@ func moveFileToRecycleBin(file string, serverDir string) {
 	dateDir := filepath.Join(serverDir, now.Format("2006-01-02"))
 	err = os.MkdirAll(dateDir, os.ModePerm)
 	if err != nil {
-		log.Printf("Failed to create date directory: %v", err)
+		logrus.WithFields(logrus.Fields{
+			"dateDir": dateDir,
+			"server":  fmt.Sprintf("%s_%s", ip, hostname),
+			"error":   err,
+		}).Error("Failed to create date directory")
 		return
 	}
 
@@ -123,14 +136,27 @@ func moveFileToRecycleBin(file string, serverDir string) {
 	destPath := filepath.Join(dateDir, fmt.Sprintf("%s_%s%s", fileInfo.Name(), timestamp, filepath.Ext(file)))
 
 	// Move file to recycle bin
-	log.Printf("Moving %s to %s...\n", file, destPath)
+	logrus.WithFields(logrus.Fields{
+		"file":     file,
+		"destPath": destPath,
+		"server":   fmt.Sprintf("%s_%s", ip, hostname),
+	}).Info("Moving file to recycle bin")
 	err = os.Rename(file, destPath)
 	if err != nil {
-		log.Printf("Failed to move %s to recycle bin: %v\n", file, err)
-		log.Println("Operation incomplete. Check files and try again.")
+		logrus.WithFields(logrus.Fields{
+			"file":     file,
+			"destPath": destPath,
+			"server":   fmt.Sprintf("%s_%s", ip, hostname),
+			"error":    err,
+		}).Error("Failed to move file to recycle bin")
+		logrus.Info("Operation incomplete. Check files and try again.")
 		return
 	}
-	log.Printf("%s successfully moved to recycle bin.\n", file)
+	logrus.WithFields(logrus.Fields{
+		"file":     file,
+		"destPath": destPath,
+		"server":   fmt.Sprintf("%s_%s", ip, hostname),
+	}).Info("File successfully moved to recycle bin")
 }
 
 func readConfig(filePath string) (Config, error) {
