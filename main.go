@@ -107,7 +107,7 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 			logrus.WithFields(logrus.Fields{
 				"file":   file,
 				"server": fmt.Sprintf("%s_%s", ip, hostname),
-			}).Info("Skipping non-existent file")
+			}).Warn("Skipping non-existent file")
 		} else {
 			logrus.WithFields(logrus.Fields{
 				"file":   file,
@@ -149,7 +149,7 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 			"server":   fmt.Sprintf("%s_%s", ip, hostname),
 			"error":    err,
 		}).Error("Failed to move file to recycle bin")
-		logrus.Info("Operation incomplete. Check files and try again.")
+		logrus.Warn("Operation incomplete. Check files and try again.")
 		return
 	}
 	logrus.WithFields(logrus.Fields{
