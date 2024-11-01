@@ -21,6 +21,13 @@ type Config struct {
 	NumWorkers    int    `json:"numWorkers"`
 }
 
+type FileMetadata struct {
+	OriginalPath string    `json:"original_path"`
+	FileSize     int64     `json:"file_size"`
+	DeletedAt    time.Time `json:"deleted_at"`
+	FileType     string    `json:"file_type"`
+}
+
 func main() {
 	// Define flags
 	var (
@@ -152,11 +159,55 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 		logrus.Warn("Operation incomplete. Check files and try again.")
 		return
 	}
+
+	// Write metadata to JSON file
+	metadata := FileMetadata{
+		OriginalPath: file,
+		FileSize:     fileInfo.Size(),
+		DeletedAt:    now,
+		FileType:     "text/plain", // You can determine the actual file type if needed
+	}
+	err = writeMetadata(dateDir, metadata)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"file":   file,
+			"server": fmt.Sprintf("%s_%s", ip, hostname),
+			"error":  err,
+		}).Error("Failed to write metadata")
+	}
+
 	logrus.WithFields(logrus.Fields{
 		"file":     file,
 		"destPath": destPath,
 		"server":   fmt.Sprintf("%s_%s", ip, hostname),
 	}).Info("File successfully moved to recycle bin")
+}
+
+func writeMetadata(dateDir string, metadata FileMetadata) error {
+	metadataFile := filepath.Join(dateDir, "metadata.json")
+	var existingMetadata []FileMetadata
+
+	// Read existing metadata if the file exists
+	if _, err := os.Stat(metadataFile); !os.IsNotExist(err) {
+		data, err := ioutil.ReadFile(metadataFile)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(data, &existingMetadata)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Append new metadata
+	existingMetadata = append(existingMetadata, metadata)
+
+	// Write updated metadata to file
+	data, err := json.MarshalIndent(existingMetadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	return ioutil.WriteFile(metadataFile, data, 0644)
 }
 
 func readConfig(filePath string) (Config, error) {
