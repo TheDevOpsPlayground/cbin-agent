@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/natefinch/lumberjack"
 	"github.com/sirupsen/logrus"
 )
@@ -23,6 +24,7 @@ type Config struct {
 
 type FileMetadata struct {
 	OriginalPath string    `json:"original_path"`
+	OriginalName string    `json:"original_name"`
 	FileSize     int64     `json:"file_size"`
 	DeletedAt    time.Time `json:"deleted_at"`
 	FileType     string    `json:"file_type"`
@@ -125,6 +127,17 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 		return
 	}
 
+	// Determine the file type before moving the file
+	mimeType, err := mimetype.DetectFile(file)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"file":   file,
+			"server": fmt.Sprintf("%s_%s", ip, hostname),
+			"error":  err,
+		}).Error("Failed to detect file type")
+		return
+	}
+
 	// Get current date and time
 	now := time.Now()
 	dateDir := filepath.Join(serverDir, now.Format("2006-01-02"))
@@ -163,9 +176,10 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 	// Write metadata to JSON file
 	metadata := FileMetadata{
 		OriginalPath: file,
+		OriginalName: fileInfo.Name(),
 		FileSize:     fileInfo.Size(),
 		DeletedAt:    now,
-		FileType:     "text/plain", // You can determine the actual file type if needed
+		FileType:     mimeType.String(),
 	}
 	err = writeMetadata(dateDir, metadata)
 	if err != nil {
