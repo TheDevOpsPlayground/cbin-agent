@@ -6,6 +6,7 @@
 
 - **Recycle Instead of Delete**: Moves specified files to a centralized recycle bin instead of deleting them permanently.
 - **Configurable Settings**: Modify paths, file monitoring, and backup settings through the `config.conf` file for flexible, tailored use.
+- **Restore Deleted**: Restore Deleted files.
 
 ## Installation
 
@@ -32,6 +33,9 @@ recycler-cli -f /path/to/file1.txt,/path/to/file2.log
 ### Options:
 - `-f`: Specify a comma-separated list of files to move to the recycle bin.
 - `-h`: Show help information.
+- `-r`: Restore files from recycle bin.
+- `-d`: Date to restore files from (format: YYYY-MM-DD).
+- `-s`: Specify a single file to restore from the recycle bin on a given date.
 
 ### Configuration
 The `config.conf` file (located by default at `/etc/recycler-cli/config.conf`) allows for adjusting key settings:
@@ -50,7 +54,6 @@ The `config.conf` file (located by default at `/etc/recycler-cli/config.conf`) a
 - **File Monitoring**: Use `fsnotify` to monitor specified files for changes such as creation, modification, or deletion.
 - **Automated Backups**: Automatically back up modified files to a designated backup directory.
 - **Health Check API**: Implement an API to check the health status of the Recycler CLI service.
-- **Restore Feature**: Allow users to restore files from the recycle bin back to their original locations.
 
 ## Uninstallation
 
