@@ -38,6 +38,7 @@ func main() {
 		files       = flag.String("f", "", "Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
 		restore     = flag.Bool("r", false, "Restore files from recycle bin")
 		restoreDate = flag.String("d", "", "Date to restore files from (format: YYYY-MM-DD)")
+		singleFile  = flag.String("s", "", "Specify a single file to restore from recycle bin")
 	)
 	flag.Parse()
 
@@ -76,7 +77,7 @@ func main() {
 	}
 
 	if *restore {
-		restoreFile(serverDir, *restoreDate)
+		restoreFile(serverDir, *restoreDate, *singleFile)
 	} else {
 		// Check if files flag is provided
 		if *files == "" {
@@ -205,7 +206,7 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 	}).Info("File successfully moved to recycle bin")
 }
 
-func restoreFile(serverDir string, restoreDate string) {
+func restoreFile(serverDir string, restoreDate string, singleFile string) {
 	var targetDirs []string
 
 	if restoreDate == "" {
@@ -259,6 +260,11 @@ func restoreFile(serverDir string, restoreDate string) {
 		}
 
 		for _, meta := range metadata {
+			// Check if restoring a specific file
+			if singleFile != "" && meta.OriginalName != singleFile {
+				continue // Skip files that don't match the specified single file
+			}
+
 			originalPath := meta.OriginalPath
 			currentPath := filepath.Join(dateDir, meta.CurrentName)
 
@@ -289,7 +295,12 @@ func restoreFile(serverDir string, restoreDate string) {
 					"currentPath":  currentPath,
 				}).Info("File successfully restored")
 
-				updateMetadata(dateDir, meta, true) // Uncomment and implement updateMetadata if needed
+				updateMetadata(dateDir, meta, true)
+			}
+
+			// Exit after restoring a single file
+			if singleFile != "" {
+				return
 			}
 		}
 	}
@@ -424,14 +435,16 @@ func printHelp() {
 	fmt.Println("  recycler-cli [options]")
 	fmt.Println()
 	fmt.Println("Options:")
-	fmt.Println("  -f, --files   Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
-	fmt.Println("  -r           Restore files from recycle bin")
-	fmt.Println("  -d, --date   Date to restore files from (format: YYYY-MM-DD)")
-	fmt.Println("  -h, --help   Display this help message")
+	fmt.Println("  -f, --files       Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
+	fmt.Println("  -r, --restore     Restore files from recycle bin")
+	fmt.Println("  -d, --date        Date to restore files from (format: YYYY-MM-DD)")
+	fmt.Println("  -s, --single-file Specify a single file to restore from the recycle bin on a given date")
+	fmt.Println("  -h, --help        Display this help message")
 	fmt.Println()
 	fmt.Println("Example:")
 	fmt.Println("  recycler-cli -f file1.txt,file2.log,file3.pdf")
 	fmt.Println("  recycler-cli -r -d 2024-11-02")
+	fmt.Println("  recycler-cli -r -d 2024-11-02 -s file1.txt")
 	fmt.Println()
 	fmt.Println("Important:")
 	fmt.Println("  - Ensure the recycle bin directory is set to a valid path.")
