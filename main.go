@@ -25,6 +25,7 @@ type Config struct {
 type FileMetadata struct {
 	OriginalPath string    `json:"original_path"`
 	OriginalName string    `json:"original_name"`
+	CurrentName  string    `json:"current_name"`
 	FileSize     int64     `json:"file_size"`
 	DeletedAt    time.Time `json:"deleted_at"`
 	FileType     string    `json:"file_type"`
@@ -33,19 +34,14 @@ type FileMetadata struct {
 func main() {
 	// Define flags
 	var (
-		help  = flag.Bool("h", false, "Show help")
-		files = flag.String("f", "", "Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
+		help        = flag.Bool("h", false, "Show help")
+		files       = flag.String("f", "", "Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
+		restore     = flag.Bool("r", false, "Restore files from recycle bin")
+		restoreDate = flag.String("d", "", "Date to restore files from (format: YYYY-MM-DD)")
 	)
 	flag.Parse()
 
 	if *help {
-		printHelp()
-		return
-	}
-
-	// Check if files flag is provided
-	if *files == "" {
-		logrus.Info("Please specify files to recycle using -f.")
 		printHelp()
 		return
 	}
@@ -79,33 +75,44 @@ func main() {
 		logrus.Fatalf("Failed to create server directory: %v", err)
 	}
 
-	// Split comma-separated files into a slice
-	fileSlice := strings.Split(*files, ",")
+	if *restore {
+		restoreFile(serverDir, *restoreDate)
+	} else {
+		// Check if files flag is provided
+		if *files == "" {
+			logrus.Info("Please specify files to recycle using -f.")
+			printHelp()
+			return
+		}
 
-	// Create a channel to send file paths to workers
-	fileChan := make(chan string, len(fileSlice))
-	for _, file := range fileSlice {
-		fileChan <- strings.TrimSpace(file)
+		// Split comma-separated files into a slice
+		fileSlice := strings.Split(*files, ",")
+
+		// Create a channel to send file paths to workers
+		fileChan := make(chan string, len(fileSlice))
+		for _, file := range fileSlice {
+			fileChan <- strings.TrimSpace(file)
+		}
+		close(fileChan)
+
+		// Create a wait group to wait for all workers to finish
+		var wg sync.WaitGroup
+
+		// Start worker goroutines
+		for i := 0; i < config.NumWorkers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for file := range fileChan {
+					moveFileToRecycleBin(file, serverDir, ip, hostname)
+				}
+			}()
+		}
+
+		// Wait for all workers to finish
+		wg.Wait()
+		logrus.Info("All specified files have been recycled.")
 	}
-	close(fileChan)
-
-	// Create a wait group to wait for all workers to finish
-	var wg sync.WaitGroup
-
-	// Start worker goroutines
-	for i := 0; i < config.NumWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for file := range fileChan {
-				moveFileToRecycleBin(file, serverDir, ip, hostname)
-			}
-		}()
-	}
-
-	// Wait for all workers to finish
-	wg.Wait()
-	logrus.Info("All specified files have been recycled.")
 }
 
 func moveFileToRecycleBin(file string, serverDir string, ip string, hostname string) {
@@ -177,6 +184,7 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 	metadata := FileMetadata{
 		OriginalPath: file,
 		OriginalName: fileInfo.Name(),
+		CurrentName:  filepath.Base(destPath), // Set the CurrentName field
 		FileSize:     fileInfo.Size(),
 		DeletedAt:    now,
 		FileType:     mimeType.String(),
@@ -195,6 +203,147 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 		"destPath": destPath,
 		"server":   fmt.Sprintf("%s_%s", ip, hostname),
 	}).Info("File successfully moved to recycle bin")
+}
+
+func restoreFile(serverDir string, restoreDate string) {
+	var targetDirs []string
+
+	if restoreDate == "" {
+		// Restore from all directories (i.e., all dates)
+		err := filepath.Walk(serverDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() && path != serverDir {
+				targetDirs = append(targetDirs, path)
+			}
+			return nil
+		})
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"error": err,
+			}).Error("Failed to walk through recycle bin directories")
+			return
+		}
+	} else {
+		// Restore from a specific date directory
+		targetDirs = append(targetDirs, filepath.Join(serverDir, restoreDate))
+	}
+
+	for _, dateDir := range targetDirs {
+		metadataFile := filepath.Join(dateDir, "metadata.json")
+		if _, err := os.Stat(metadataFile); os.IsNotExist(err) {
+			logrus.WithFields(logrus.Fields{
+				"metadataFile": metadataFile,
+			}).Warn("Metadata file not found, skipping directory")
+			continue
+		}
+
+		data, err := ioutil.ReadFile(metadataFile)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"metadataFile": metadataFile,
+				"error":        err,
+			}).Error("Failed to read metadata file")
+			continue
+		}
+
+		var metadata []FileMetadata
+		err = json.Unmarshal(data, &metadata)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{
+				"metadataFile": metadataFile,
+				"error":        err,
+			}).Error("Failed to unmarshal metadata")
+			continue
+		}
+
+		for _, meta := range metadata {
+			originalPath := meta.OriginalPath
+			currentPath := filepath.Join(dateDir, meta.CurrentName)
+
+			// Check if the file to be restored still exists in the recycle bin
+			if _, err := os.Stat(currentPath); os.IsNotExist(err) {
+				logrus.WithFields(logrus.Fields{
+					"originalPath": originalPath,
+					"currentPath":  currentPath,
+				}).Warn("File to be restored not found in recycle bin, skipping")
+				continue
+			}
+
+			// Attempt to restore the file
+			logrus.WithFields(logrus.Fields{
+				"originalPath": originalPath,
+				"currentPath":  currentPath,
+			}).Info("Restoring file")
+			err = os.Rename(currentPath, originalPath)
+			if err != nil {
+				logrus.WithFields(logrus.Fields{
+					"originalPath": originalPath,
+					"currentPath":  currentPath,
+					"error":        err,
+				}).Error("Failed to restore file")
+			} else {
+				logrus.WithFields(logrus.Fields{
+					"originalPath": originalPath,
+					"currentPath":  currentPath,
+				}).Info("File successfully restored")
+
+				updateMetadata(dateDir, meta, true) // Uncomment and implement updateMetadata if needed
+			}
+		}
+	}
+}
+
+func updateMetadata(dateDir string, metadataToRemove FileMetadata, remove bool) {
+	metadataFile := filepath.Join(dateDir, "metadata.json")
+	data, err := ioutil.ReadFile(metadataFile)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"metadataFile": metadataFile,
+			"error":        err,
+		}).Error("Failed to read metadata file for update")
+		return
+	}
+
+	var metadata []FileMetadata
+	err = json.Unmarshal(data, &metadata)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"metadataFile": metadataFile,
+			"error":        err,
+		}).Error("Failed to unmarshal metadata for update")
+		return
+	}
+
+	var updatedMetadata []FileMetadata
+	for _, meta := range metadata {
+		if (meta.OriginalPath != metadataToRemove.OriginalPath) || (meta.DeletedAt != metadataToRemove.DeletedAt) {
+			updatedMetadata = append(updatedMetadata, meta)
+		} else if !remove {
+			updatedMetadata = append(updatedMetadata, metadataToRemove)
+		}
+	}
+
+	data, err = json.MarshalIndent(updatedMetadata, "", "  ")
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"error": err,
+		}).Error("Failed to marshal updated metadata")
+		return
+	}
+
+	err = ioutil.WriteFile(metadataFile, data, 0644)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"metadataFile": metadataFile,
+			"error":        err,
+		}).Error("Failed to write updated metadata")
+	} else {
+		logrus.WithFields(logrus.Fields{
+			"metadataFile": metadataFile,
+		}).Info("Metadata successfully updated")
+	}
 }
 
 func writeMetadata(dateDir string, metadata FileMetadata) error {
@@ -276,10 +425,13 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -f, --files   Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
-	fmt.Println("  -h, --help    Display this help message")
+	fmt.Println("  -r           Restore files from recycle bin")
+	fmt.Println("  -d, --date   Date to restore files from (format: YYYY-MM-DD)")
+	fmt.Println("  -h, --help   Display this help message")
 	fmt.Println()
 	fmt.Println("Example:")
 	fmt.Println("  recycler-cli -f file1.txt,file2.log,file3.pdf")
+	fmt.Println("  recycler-cli -r -d 2024-11-02")
 	fmt.Println()
 	fmt.Println("Important:")
 	fmt.Println("  - Ensure the recycle bin directory is set to a valid path.")
