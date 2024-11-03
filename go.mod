@@ -1,4 +1,4 @@
-module recycler-cli
+module cbin/agent
 
 go 1.18
 
