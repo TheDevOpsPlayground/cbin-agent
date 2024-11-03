@@ -27,7 +27,7 @@ func main() {
 	}
 
 	// Read configuration from file
-	config, err := readConfig("/etc/recycler-cli/config.conf")
+	config, err := readConfig("/etc/cbin/config.conf")
 	if err != nil {
 		logrus.Fatalf("Failed to read configuration file: %v", err)
 	}
@@ -59,10 +59,10 @@ func main() {
 }
 
 func printHelp() {
-	fmt.Println("recycler-cli - A safer alternative to rm, moving files to a recycle bin.")
-	fmt.Println("---------------------------------------------------------------")
+	fmt.Println("cbin- A centralized recycle bin for Linux servers.")
+	fmt.Println("--------------------------------------------------")
 	fmt.Println("Usage:")
-	fmt.Println("  recycler-cli [options]")
+	fmt.Println(" cbin [options]")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -f, --files       Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
@@ -72,9 +72,9 @@ func printHelp() {
 	fmt.Println("  -h, --help        Display this help message")
 	fmt.Println()
 	fmt.Println("Example:")
-	fmt.Println("  recycler-cli -f file1.txt,file2.log,file3.pdf")
-	fmt.Println("  recycler-cli -r -d 2024-11-02")
-	fmt.Println("  recycler-cli -r -d 2024-11-02 -s file1.txt")
+	fmt.Println("  cbin -f file1.txt,file2.log,file3.pdf")
+	fmt.Println("  cbin -r -d 2024-11-02")
+	fmt.Println("  cbin -r -d 2024-11-02 -s file1.txt")
 	fmt.Println()
 	fmt.Println("Important:")
 	fmt.Println("  - Ensure the recycle bin directory is set to a valid path.")
