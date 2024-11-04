@@ -9,6 +9,9 @@ LOG_DIR="/var/log/cbin"
 MOUNT_POINT="/mnt/recyclebin"
 CBINSYSTEMD_FILE="/etc/systemd/system/cbin.service"
 HEALTHCHECKERSYSTEMD_FILE="/etc/systemd/system/healthchecker.service"
+CURRENT_DIR="$(pwd)"   
+ENV_FILE_SRC="$CURRENT_DIR/env" 
+ENV_FILE="$INSTALL_DIR/env" 
 
 # Check for root privileges
 if [[ $EUID -ne 0 ]]; then
@@ -25,6 +28,20 @@ fi
 # Create necessary directories
 echo "Creating installation directories..."
 sudo mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$MOUNT_POINT"
+
+cp "$ENV_FILE_SRC" "$ENV_FILE"
+source "$ENV_FILE"
+
+if [[ -z "$master_ip" || -z "$client_ip" ]]; then
+    echo "Error: Missing required environment variables in $ENV_FILE."
+    exit 1
+fi
+
+mount -o rw,sync,nfsvers=4 "$master_ip:/mnt/check/$client_ip" "$MOUNT_POINT"
+if [[ $? -ne 0 ]]; then
+   echo "Error: Failed to mount NFS. Installation aborted."
+   exit 1
+fi
 
 # Download binary from GitHub and place it in the installation directory
 echo "Downloading cbin binary..."
