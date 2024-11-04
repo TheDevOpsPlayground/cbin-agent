@@ -205,7 +205,7 @@ func removeAliasAndReload() {
 
 	output := ""
 	for _, line := range strings.Split(string(input), "\n") {
-		if !strings.Contains(line, "alias rm='/etc/c_bin/recycle'") {
+		if !strings.Contains(line, "alias rm='/opt/cbin/cbin'") {
 			output += line + "\n"
 		}
 	}
