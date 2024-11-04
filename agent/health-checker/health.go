@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	clientIP   string
-	serverPort = ":10001"
-	retryCount = 5
-	retryDelay = 1 * time.Minute
+	clientIP      string
+	serverPort    = ":10001"
+	retryCount    = 5
+	retryDelay    = 1 * time.Minute
+	recycleBinDir string
 )
 
 type HealthResponse struct {
@@ -28,9 +29,17 @@ type HealthResponse struct {
 	OverallHealthStatus string `json:"overall_health_status"`
 }
 
+type Config struct {
+	RecycleBinDir string `json:"recycleBinDir"`
+	NumWorkers    int    `json:"numWorkers"`
+}
+
 func main() {
 	envFile := "/etc/cbin/env"
 	loadEnv(envFile)
+
+	configFile := "/etc/cbin/config.conf"
+	loadConfig(configFile)
 
 	startHTTPServer()
 }
@@ -61,6 +70,24 @@ func loadEnv(envFile string) {
 			clientIP = value
 		}
 	}
+}
+
+func loadConfig(configFile string) {
+	file, err := os.Open(configFile)
+	if err != nil {
+		fmt.Println("Error opening config file:", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	var config Config
+	err = json.NewDecoder(file).Decode(&config)
+	if err != nil {
+		fmt.Println("Error decoding config file:", err)
+		os.Exit(1)
+	}
+
+	recycleBinDir = config.RecycleBinDir
 }
 
 func startHTTPServer() {
@@ -102,14 +129,19 @@ func evaluateHealth() HealthResponse {
 }
 
 func checkRecycleBin() bool {
-	if _, err := os.Stat("/mnt/recyclebin"); err == nil {
+	if recycleBinDir == "" {
+		fmt.Println("Recycle bin directory not set in config file.")
+		return false
+	}
+
+	if _, err := os.Stat(recycleBinDir); err == nil {
 		return true
 	}
 	return false
 }
 
 func checkRecycleFile() bool {
-	if _, err := os.Stat("/etc/cbin/recycle"); err == nil {
+	if _, err := os.Stat("/opt/cbin/cbin"); err == nil {
 		return true
 	}
 	return false
@@ -126,7 +158,7 @@ func checkAlias() bool {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, "alias rm='/etc/cbin/recycle'") {
+		if strings.Contains(line, "alias rm='/opt/cbin/cbin'") {
 			return true
 		}
 	}
