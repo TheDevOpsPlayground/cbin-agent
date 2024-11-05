@@ -38,55 +38,87 @@ func recycleFiles(files []string, serverDir string, numWorkers int, ip string, h
 func moveFileToRecycleBin(file string, serverDir string, ip string, hostname string) {
 	fileInfo, err := os.Stat(file)
 	if err != nil {
-		logrus.WithFields(logrus.Fields{"file": file, "server": fmt.Sprintf("%s_%s", ip, hostname)}).Warn("File does not exist")
+		if os.IsNotExist(err) {
+			logrus.WithFields(logrus.Fields{"file": file, "server": fmt.Sprintf("%s_%s", ip, hostname)}).Warn("File or directory does not exist")
+		} else {
+			logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to get file info")
+		}
 		return
 	}
 
-	mimeType, err := mimetype.DetectFile(file)
-	if err != nil {
-		logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to detect file type")
-		return
-	}
-
+	// Create the date directory for today's date
 	dateDir := filepath.Join(serverDir, time.Now().Format("2006-01-02"))
 	os.MkdirAll(dateDir, os.ModePerm)
 
-	destPath := filepath.Join(dateDir, fmt.Sprintf("%s_%s%s", fileInfo.Name(), time.Now().Format("15:04:05"), filepath.Ext(file)))
+	var destPath string
+	if fileInfo.IsDir() {
+		// Handle directory
+		logrus.WithFields(logrus.Fields{"dir": file}).Info("Moving directory to recycle bin")
 
-	// Attempt to rename the file
-	err = os.Rename(file, destPath)
-	if err != nil {
-		// If rename fails, try copying the file instead
-		data, err := ioutil.ReadFile(file)
+		destPath = filepath.Join(dateDir, fmt.Sprintf("%s_%s", filepath.Base(file), time.Now().Format("15:04:05")))
+
+		err = os.Rename(file, destPath)
 		if err != nil {
-			logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to read file for copy")
+			logrus.WithFields(logrus.Fields{"dir": file, "destPath": destPath, "error": err}).Error("Failed to move directory")
 			return
 		}
 
-		err = ioutil.WriteFile(destPath, data, fileInfo.Mode())
+		metadata := FileMetadata{
+			OriginalPath: file,
+			OriginalName: filepath.Base(file),
+			CurrentName:  filepath.Base(destPath),
+			DeletedAt:    time.Now(),
+			FileType:     "directory", // Set file type as 'directory'
+		}
+		writeMetadata(dateDir, metadata)
+	} else {
+		// Handle file
+		logrus.WithFields(logrus.Fields{"file": file}).Info("Moving file to recycle bin")
+
+		// Detect MIME type of the file
+		mimeType, err := mimetype.DetectFile(file)
 		if err != nil {
-			logrus.WithFields(logrus.Fields{"file": file, "destPath": destPath, "error": err}).Error("Failed to write file copy")
+			logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to detect file type")
 			return
 		}
 
-		// Delete the original file after successful copy
-		err = os.Remove(file)
+		// Create destination path for the file
+		destPath = filepath.Join(dateDir, fmt.Sprintf("%s_%s%s", fileInfo.Name(), time.Now().Format("15:04:05"), filepath.Ext(file)))
+
+		// Attempt to rename the file
+		err = os.Rename(file, destPath)
 		if err != nil {
-			logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to delete original file after copy")
-			return
+			// If rename fails, try copying the file instead
+			data, err := ioutil.ReadFile(file)
+			if err != nil {
+				logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to read file for copy")
+				return
+			}
+
+			err = ioutil.WriteFile(destPath, data, fileInfo.Mode())
+			if err != nil {
+				logrus.WithFields(logrus.Fields{"file": file, "destPath": destPath, "error": err}).Error("Failed to write file copy")
+				return
+			}
+
+			// Delete the original file after successful copy
+			err = os.Remove(file)
+			if err != nil {
+				logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to delete original file after copy")
+				return
+			}
 		}
+
+		metadata := FileMetadata{
+			OriginalPath: file,
+			OriginalName: fileInfo.Name(),
+			CurrentName:  filepath.Base(destPath),
+			FileSize:     fileInfo.Size(),
+			DeletedAt:    time.Now(),
+			FileType:     mimeType.String(),
+		}
+		writeMetadata(dateDir, metadata)
 	}
-
-	metadata := FileMetadata{
-		OriginalPath: file,
-		OriginalName: fileInfo.Name(),
-		CurrentName:  filepath.Base(destPath),
-		FileSize:     fileInfo.Size(),
-		DeletedAt:    time.Now(),
-		FileType:     mimeType.String(),
-	}
-	writeMetadata(dateDir, metadata)
-	logrus.Info("File moved to recycle bin")
 }
 
 func restoreFile(serverDir string, restoreDate string, singleFile string) {
