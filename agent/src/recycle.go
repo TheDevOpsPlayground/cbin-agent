@@ -52,9 +52,29 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 	os.MkdirAll(dateDir, os.ModePerm)
 
 	destPath := filepath.Join(dateDir, fmt.Sprintf("%s_%s%s", fileInfo.Name(), time.Now().Format("15:04:05"), filepath.Ext(file)))
-	if err := os.Rename(file, destPath); err != nil {
-		logrus.WithFields(logrus.Fields{"file": file, "destPath": destPath, "error": err}).Error("Failed to move file")
-		return
+
+	// Attempt to rename the file
+	err = os.Rename(file, destPath)
+	if err != nil {
+		// If rename fails, try copying the file instead
+		data, err := ioutil.ReadFile(file)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to read file for copy")
+			return
+		}
+
+		err = ioutil.WriteFile(destPath, data, fileInfo.Mode())
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"file": file, "destPath": destPath, "error": err}).Error("Failed to write file copy")
+			return
+		}
+
+		// Delete the original file after successful copy
+		err = os.Remove(file)
+		if err != nil {
+			logrus.WithFields(logrus.Fields{"file": file, "error": err}).Error("Failed to delete original file after copy")
+			return
+		}
 	}
 
 	metadata := FileMetadata{
@@ -145,21 +165,37 @@ func restoreFile(serverDir string, restoreDate string, singleFile string) {
 				"originalPath": originalPath,
 				"currentPath":  currentPath,
 			}).Info("Restoring file")
+
+			// Attempt to rename the file
 			err = os.Rename(currentPath, originalPath)
 			if err != nil {
-				logrus.WithFields(logrus.Fields{
-					"originalPath": originalPath,
-					"currentPath":  currentPath,
-					"error":        err,
-				}).Error("Failed to restore file")
-			} else {
-				logrus.WithFields(logrus.Fields{
-					"originalPath": originalPath,
-					"currentPath":  currentPath,
-				}).Info("File successfully restored")
+				// If rename fails, try copying the file instead
+				data, err := ioutil.ReadFile(currentPath)
+				if err != nil {
+					logrus.WithFields(logrus.Fields{"file": currentPath, "error": err}).Error("Failed to read file for copy")
+					continue
+				}
 
-				updateMetadata(dateDir, meta, true)
+				err = ioutil.WriteFile(originalPath, data, os.ModePerm)
+				if err != nil {
+					logrus.WithFields(logrus.Fields{"file": originalPath, "error": err}).Error("Failed to write file copy")
+					continue
+				}
+
+				// Delete the file from the recycle bin after successful copy
+				err = os.Remove(currentPath)
+				if err != nil {
+					logrus.WithFields(logrus.Fields{"file": currentPath, "error": err}).Error("Failed to delete file from recycle bin after copy")
+					continue
+				}
 			}
+
+			logrus.WithFields(logrus.Fields{
+				"originalPath": originalPath,
+				"currentPath":  currentPath,
+			}).Info("File successfully restored")
+
+			updateMetadata(dateDir, meta, true)
 
 			// Exit after restoring a single file
 			if singleFile != "" {
