@@ -11,7 +11,7 @@ import (
 
 func initLogger() {
 	logrus.SetOutput(&lumberjack.Logger{
-		Filename:   "/var/log/recycler-cli/recycler-cli.log",
+		Filename:   "/var/log/cbin/cbin.log",
 		MaxSize:    10,
 		MaxBackups: 3,
 		MaxAge:     28,
