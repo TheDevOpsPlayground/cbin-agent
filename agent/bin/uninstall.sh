@@ -19,10 +19,10 @@ fi
 
 # Stop and disable systemd services
 echo "Stopping and disabling systemd services..."
-sudo systemctl stop cbin
-sudo systemctl disable cbin
-sudo systemctl stop health
-sudo systemctl disable health
+sudo systemctl stop cbin 2>/dev/null || true
+sudo systemctl disable cbin 2>/dev/null || true
+sudo systemctl stop health 2>/dev/null || true
+sudo systemctl disable health 2>/dev/null || true
 
 # Remove systemd service files
 echo "Removing systemd service files..."
@@ -42,7 +42,7 @@ sudo rm -rf "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$MOUNT_POINT"
 
 # Remove alias from global bashrc if it exists
 echo "Removing alias from bashrc..."
-sudo sed -i "/alias rm='$CBIN_PATH'/d" "$BASHRC_FILE"
+sudo sed -i.bak '/alias rm=/d' "$BASHRC_FILE"
 
 # Confirmation message
 echo -e "\nUninstallation Complete!"
