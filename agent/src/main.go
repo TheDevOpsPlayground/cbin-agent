@@ -14,7 +14,8 @@ func main() {
 	// Define flags
 	var (
 		help        = flag.Bool("h", false, "Show help")
-		files       = flag.String("rf", "", "Comma-separated list of files to recycle")
+		forceRemove = flag.Bool("rf", false, "Force remove files or directories (use with caution)")
+		files       = flag.String("files", "", "Comma-separated list of files to recycle")
 		restore     = flag.Bool("restore", false, "Restore files from recycle bin")
 		restoreDate = flag.String("d", "", "Date to restore files from (format: YYYY-MM-DD)")
 		singleFile  = flag.String("s", "", "Specify a single file to restore from recycle bin")
@@ -58,7 +59,7 @@ func main() {
 		restoreFile(serverDir, *restoreDate, *singleFile)
 	} else if *files != "" {
 		fileSlice := strings.Split(*files, ",")
-		recycleFiles(fileSlice, serverDir, config.NumWorkers, ip, hostname)
+		recycleFiles(fileSlice, serverDir, config.NumWorkers, ip, hostname, *forceRemove)
 	} else {
 		logrus.Info("Please specify files to recycle using -rf or as positional arguments.")
 		printHelp()
@@ -72,7 +73,8 @@ func printHelp() {
 	fmt.Println(" cbin [options] [files...]")
 	fmt.Println()
 	fmt.Println("Options:")
-	fmt.Println("  -rf, --files        Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
+	fmt.Println("  -rf, --force-remove   Force remove files or directories (use with caution)")
+	fmt.Println("  -f, --files        Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
 	fmt.Println("  -restore, --restore Restore files from recycle bin")
 	fmt.Println("  -d, --date          Date to restore files from (format: YYYY-MM-DD)")
 	fmt.Println("  -s, --single-file   Specify a single file to restore from the recycle bin on a given date")

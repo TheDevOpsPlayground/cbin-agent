@@ -14,7 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func recycleFiles(files []string, serverDir string, numWorkers int, ip string, hostname string) {
+func recycleFiles(files []string, serverDir string, numWorkers int, ip string, hostname string, forceRemove bool) {
 	fileChan := make(chan string, len(files))
 	for _, file := range files {
 		fileChan <- strings.TrimSpace(file)
@@ -27,12 +27,25 @@ func recycleFiles(files []string, serverDir string, numWorkers int, ip string, h
 		go func() {
 			defer wg.Done()
 			for file := range fileChan {
+				if !forceRemove && isDirectory(file) {
+					logrus.WithFields(logrus.Fields{"dir": file, "server": fmt.Sprintf("%s_%s", ip, hostname)}).Error("rm: cannot remove its a directory")
+					fmt.Printf("rm: cannot remove '%s': Is a directory\n", file)
+					continue
+				}
 				moveFileToRecycleBin(file, serverDir, ip, hostname)
 			}
 		}()
 	}
 	wg.Wait()
 	logrus.Info("All specified files have been recycled.")
+}
+
+func isDirectory(file string) bool {
+	fileInfo, err := os.Stat(file)
+	if err != nil {
+		return false
+	}
+	return fileInfo.IsDir()
 }
 
 func moveFileToRecycleBin(file string, serverDir string, ip string, hostname string) {
