@@ -47,22 +47,29 @@ func main() {
 		logrus.Fatalf("Failed to create server directory: %v", err)
 	}
 
+	// Handle positional arguments (files to recycle) separately
+	if len(flag.Args()) > 0 {
+		// Use positional arguments as the list of files to recycle
+		*files = strings.Join(flag.Args(), ",")
+	}
+
+	// Process restore or recycle actions
 	if *restore {
 		restoreFile(serverDir, *restoreDate, *singleFile)
 	} else if *files != "" {
 		fileSlice := strings.Split(*files, ",")
 		recycleFiles(fileSlice, serverDir, config.NumWorkers, ip, hostname)
 	} else {
-		logrus.Info("Please specify files to recycle using -rf.")
+		logrus.Info("Please specify files to recycle using -rf or as positional arguments.")
 		printHelp()
 	}
 }
 
 func printHelp() {
-	fmt.Println("cbin- A centralized recycle bin for Linux servers.")
+	fmt.Println("cbin - A centralized recycle bin for Linux servers.")
 	fmt.Println("--------------------------------------------------")
 	fmt.Println("Usage:")
-	fmt.Println(" cbin [options]")
+	fmt.Println(" cbin [options] [files...]")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  -rf, --files        Comma-separated list of files to recycle (e.g., file1.txt,file2.log)")
@@ -75,6 +82,7 @@ func printHelp() {
 	fmt.Println("  cbin -rf file1.txt,file2.log,file3.pdf")
 	fmt.Println("  cbin -restore -d 2024-11-02")
 	fmt.Println("  cbin -restore -d 2024-11-02 -s file1.txt")
+	fmt.Println("  cbin file1.txt")
 	fmt.Println()
 	fmt.Println("Important:")
 	fmt.Println("  - Ensure the recycle bin directory is set to a valid path.")
