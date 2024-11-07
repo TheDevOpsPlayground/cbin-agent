@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Agent</title>
+
+    <!-- Load static tag -->
+    {% load static %}
+
+    <!-- Font and Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" type="text/css" href="{% static 'css/style.css' %}">
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="text-center">
+            <img src="{% static 'logo.png' %}" alt="Logo" style="width: 120px; margin-bottom: 30px;">
+        </div>
+        <a href="{% url 'dashboard' %}"><i class="fas fa-tachometer-alt icon"></i> Dashboard</a>
+        <a href="{% url 'view_logs' %}"><i class="fas fa-file-alt icon"></i> Logs</a>
+        <a href="{% url 'data_viewer' %}"><i class="fas fa-folder-open icon"></i> File Explorer</a>
+        <a href="#" class="active"><i class="fas fa-user-plus icon"></i> Add Agent</a>
+        <a href="{% url 'view_agents' %}"><i class="fas fa-users icon"></i> View Agents</a>
+        <a href="{% url 'mount' %}"><i class="fas fa-plug icon"></i> Mount Path</a>
+        <a href="{% url 'variables' %}"><i class="fas fa-cogs icon"></i> ENVs</a>
+        <div class="logout-btn">
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button class="btn btn-danger" type="submit">Logout</button>
+            </form>
+        </div>
+    </div>
+<!-- Main Content -->
+<div class="main-content">
+    <nav class="navbar navbar-expand-lg navbar-light bg-light shadow-sm">
+        <a class="navbar-brand" href="#">Cbin</a>
+    </nav>
+
+    <div class="container mt-5">
+        <h2 class="text-center mb-4" style="font-weight: 700; color: #34495e;">Add Agent</h2>
+
+        <!-- Display messages (success or error) -->
+        {% if messages %}
+            <!-- Container to highlight messages -->
+            <div class="alert-container mb-4">
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} text-center" style="font-size: 1.1rem; padding: 20px; border-radius: 10px;">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <!-- Add Agent Form -->
+        <div class="card p-5 mx-auto shadow" style="max-width: 600px; border-radius: 15px;">
+            <h5 class="card-title text-center mb-4" style="font-weight: 600; color: #2c3e50;">Enter Agent Details</h5>
+            <form method="POST">
+                {% csrf_token %}
+                
+                <!-- Render form fields manually with custom classes -->
+                <div class="form-group mb-4">
+                    <label for="id_ip_address" class="form-label">IP Address</label>
+                    {{ form.ip_address }}
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg btn-block" style="border-radius: 30px; padding: 12px 25px; font-size: 1.1rem;">Add Agent</button>
+            </form>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="text-center mt-5">
+            <a href="{% url 'view_agents' %}" class="btn btn-outline-secondary btn-lg" style="border-radius: 20px; padding: 12px 30px; margin-right: 15px;">View Agents</a>
+            <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-lg" style="border-radius: 20px; padding: 12px 30px;">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+
+<!-- Custom CSS for Improved Appearance -->
+<style>
+    .alert-container {
+        margin-bottom: 20px;
+    }
+
+    .btn-outline-secondary {
+        border-radius: 20px;
+        margin: 5px;
+        padding: 12px 25px;
+        font-size: 1rem;
+        transition: background-color 0.3s ease;
+    }
+
+    .btn-outline-secondary:hover {
+        background-color: #f1f1f1;
+        color: #34495e;
+    }
+
+    .form-control {
+        border-radius: 10px;
+        padding: 15px;
+        font-size: 1rem;
+        margin-bottom: 20px;
+        border: 1px solid #ddd;
+        transition: border-color 0.3s ease;
+    }
+
+    .form-control:focus {
+        border-color: #3498db;
+        box-shadow: 0 0 5px rgba(52, 152, 219, 0.5);
+    }
+
+    .form-label {
+        font-weight: 600;
+        color: #34495e;
+    }
+
+    .card {
+        background-color: #fff;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    h5.card-title {
+        font-size: 1.25rem;
+    }
+
+    .navbar {
+        background-color: #f8f9fa;
+    }
+
+    .navbar-brand {
+        font-weight: bold;
+        color: #2c3e50;
+        font-size: 1.5rem;
+    }
+
+    .alert {
+        font-size: 1.1rem;
+        padding: 20px;
+        border-radius: 10px;
+    }
+
+    .alert-danger {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+
+    .alert-success {
+        background-color: #d4edda;
+        color: #155724;
+    }
+
+    .alert-warning {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+</style>
+
+    <!-- JS Files -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.2/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

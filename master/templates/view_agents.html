@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Viewer</title>
+
+    <!-- Load static tag -->
+    {% load static %}
+
+    <!-- Font and Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" type="text/css" href="{% static 'css/style.css' %}">
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="text-center">
+            <img src="{% static 'logo.png' %}" alt="Logo" style="width: 120px; margin-bottom: 30px;">
+        </div>
+        <a href="{% url 'dashboard' %}"><i class="fas fa-tachometer-alt icon"></i> Dashboard</a>
+        <a href="{% url 'view_logs' %}"><i class="fas fa-file-alt icon"></i> Logs</a>
+        <a href="{% url 'data_viewer' %}"><i class="fas fa-folder-open icon"></i> File Explorer</a>
+        <a href="{% url 'add_agent' %}"><i class="fas fa-users icon"></i> Add Agent</a>
+        <a href="#" class="active"><i class="fas fa-users icon"></i> View Agents</a>
+        <a href="{% url 'mount' %}"><i class="fas fa-plug icon"></i> Mount Path</a>
+        <a href="{% url 'variables' %}"><i class="fas fa-cogs icon"></i> ENVs</a>
+        <div class="logout-btn">
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button class="btn btn-danger" type="submit">Logout</button>
+            </form>
+        </div>
+    </div>
+  <!-- Main Content -->
+<div class="content">
+    <div class="container mt-5">
+        <h2 class="text-center mb-4">View Agents</h2>
+
+        <!-- Display messages -->
+        {% if messages %}
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+            {% endfor %}
+        {% endif %}
+        
+        <!-- Card for agents table -->
+        <div class="card p-4">
+            <h5 class="card-title text-center">Registered Agents</h5>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agent in agents %}
+                    <tr>
+                        <td>{{ agent.ip_address }}</td>
+                        <td class="{% if agent.status == 'active' %}status-active{% else %}status-inactive{% endif %}">
+                            {{ agent.get_status_display }}
+                        </td>
+                        <td>
+                            <a href="{% url 'delete_agent' agent.id %}" class="btn btn-danger btn-sm">Delete</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="3">No agents found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="text-center mt-4">
+            <a href="{% url 'add_agent' %}" class="btn btn-custom">Add Agent</a>
+            <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+
+<!-- Custom CSS -->
+<style>
+    .status-active {
+        color: green;
+        font-weight: bold;
+    }
+
+    .status-inactive {
+        color: red;
+        font-weight: bold;
+    }
+
+    .btn-custom {
+        background-color: #1abc9c;
+        color: white;
+    }
+
+    .btn-custom:hover {
+        background-color: #16a085;
+    }
+</style>
+
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

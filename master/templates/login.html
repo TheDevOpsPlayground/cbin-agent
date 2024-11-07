@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Recycle Bin</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    {% load static %}
+    <link rel="stylesheet" type="text/css" href="{% static 'style.css' %}"> <!-- Custom styles -->
+    <style>
+        body {
+            background: linear-gradient(135deg, #4e73df, #1cc88a); /* Gradient background */
+            font-family: 'Arial', sans-serif;
+        }
+
+        .login-container {
+            width: 400px;
+            margin: 100px auto; /* Centering the form */
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2); /* Larger shadow for depth */
+            background-color: #ffffff; /* White background for form */
+            transition: transform 0.3s ease-in-out;
+        }
+
+        .login-container:hover {
+            transform: scale(1.02); /* Slight hover effect */
+        }
+
+        .login-container h2 {
+            color: #333;
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            font-size: 1rem;
+            color: #555;
+        }
+
+        .form-control {
+            height: 45px;
+            border-radius: 10px;
+            padding-left: 15px;
+            border: 1px solid #ddd;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-control:focus {
+            border-color: #4e73df; /* Highlight input on focus */
+            box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+        }
+
+        .btn-primary {
+            width: 100%;
+            background-color: #4e73df;
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 1.1rem;
+            font-weight: 6000;
+        }
+
+        .btn-primary:hover {
+            background-color: #2e59d9; /* Slightly darker shade on hover */
+        }
+
+        .text-center a {
+            color: #4e73df;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .text-center a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-text {
+            font-size: 0.8rem;
+            color: #555;
+            text-align: center;
+            margin-top: 4000px;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="login-container">
+    <h2>Cbin Master</h2>
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="username">Username</label>
+            <input type="text" class="form-control" id="username" name="username" required>
+        </div>
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" class="form-control" id="password" name="password" required>
+        </div>
+        <button type="submit" class="btn btn-primary">Login</button>
+    </form>
+    <div class="text-center mt-3">
+        <a href="#">Forgot your password?</a>
+    </div>
+</div>
+
+<div class="footer-text">
+    <p>&copy; 2024 Recycle Bin. All rights reserved.</p>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.2/dist/umd/popper.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>
