@@ -38,8 +38,9 @@ func initLogger(serverDir string) {
 	writers = append(writers, primaryLog)
 
 	// Secondary log file
+	secondaryLogPath := filepath.Join(serverDir, "cbin.log")
 	secondaryLog := &lumberjack.Logger{
-		Filename:   filepath.Join(serverDir, "cbin.log"),
+		Filename:   secondaryLogPath,
 		MaxSize:    10,
 		MaxBackups: 3,
 		MaxAge:     28,
@@ -56,9 +57,18 @@ func initLogger(serverDir string) {
 	if err != nil {
 		logrus.Errorf("Failed to set permissions on /var/log/cbin/cbin.log: %v", err)
 	}
-	err = os.Chmod(filepath.Join(serverDir, "cbin.log"), 0777)
+
+	// Ensure the secondary log file exists and set its permissions
+	if _, err := os.Stat(secondaryLogPath); os.IsNotExist(err) {
+		file, err := os.Create(secondaryLogPath)
+		if err != nil {
+			logrus.Fatalf("Failed to create secondary log file: %v", err)
+		}
+		file.Close()
+	}
+	err = os.Chmod(secondaryLogPath, 0777)
 	if err != nil {
-		logrus.Errorf("Failed to set permissions on %s: %v", filepath.Join(serverDir, "cbin.log"), err)
+		logrus.Errorf("Failed to set permissions on %s: %v", secondaryLogPath, err)
 	}
 }
 
