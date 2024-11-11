@@ -1,49 +1,64 @@
 #!/bin/bash
 
-# Define variables
-INSTALL_DIR="/opt/cbin"
-CBIN_PATH="/usr/local/bin/cbin"
-HEALTHCHECKER_PATH="/usr/local/bin/health"
-CONFIG_DIR="/etc/cbin"
-LOG_DIR="/var/log/cbin"
-MOUNT_POINT="/mnt/recyclebin"
-CBINSYSTEMD_FILE="/etc/systemd/system/cbin.service"
-HEALTHCHECKERSYSTEMD_FILE="/etc/systemd/system/healthchecker.service"
-BASHRC_FILE="/etc/bash.bashrc"
-
 # Check for root privileges
 if [[ $EUID -ne 0 ]]; then
-   echo "This script must be run as root."
-   exit 1
+    echo "This script must be run as root."
+    exit 1
 fi
 
-# Stop and disable systemd services
-echo "Stopping and disabling systemd services..."
-sudo systemctl stop cbin 2>/dev/null || true
-sudo systemctl disable cbin 2>/dev/null || true
-sudo systemctl stop health 2>/dev/null || true
-sudo systemctl disable health 2>/dev/null || true
+# Stop and disable services
+echo "Stopping and disabling services..."
+systemctl stop cbin
+systemctl disable cbin
+systemctl stop health
+systemctl disable health
 
 # Remove systemd service files
 echo "Removing systemd service files..."
-sudo rm -f "$CBINSYSTEMD_FILE" "$HEALTHCHECKERSYSTEMD_FILE"
+rm -f /etc/systemd/system/cbin.service
+rm -f /etc/systemd/system/health.service
 
-# Reload systemd to apply changes
-echo "Reloading systemd daemon..."
-sudo systemctl daemon-reload
+# Reload systemd
+echo "Reloading systemd..."
+systemctl daemon-reload
 
 # Remove symbolic links
 echo "Removing symbolic links..."
-sudo rm -f "$CBIN_PATH" "$HEALTHCHECKER_PATH"
+rm -f /usr/local/bin/cbin
+rm -f /usr/local/bin/health
 
-# Remove installation directories and files
-echo "Removing installation directories and files..."
-sudo rm -rf "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$MOUNT_POINT"
+# Remove binaries
+echo "Removing binaries..."
+rm -rf /opt/cbin
 
-# Remove alias from global bashrc if it exists
-echo "Removing alias from bashrc..."
-sudo sed -i.bak '/alias rm=/d' "$BASHRC_FILE"
+# Remove configuration files
+echo "Removing configuration files..."
+rm -rf /etc/cbin
 
-# Confirmation message
-echo -e "\nUninstallation Complete!"
-echo -e "All files, directories, and services related to cbin and health-checker have been removed."
+# Remove log files
+echo "Removing log files..."
+rm -rf /var/log/cbin
+
+# Remove mount point
+echo "Unmounting and removing mount point..."
+umount /mnt/recyclebin
+rm -rf /mnt/recyclebin
+
+# Remove alias from bash.bashrc
+echo "Removing alias from bash.bashrc..."
+sed -i '/alias rm/d' /etc/bash.bashrc
+
+# Remove NFS mount from /etc/fstab
+echo "Removing NFS mount from /etc/fstab..."
+sed -i '/nfs/d' /etc/fstab
+
+# Remove environment files
+echo "Removing environment files..."
+rm -f /etc/cbin/env
+rm -f $(pwd)/.env
+
+# Remove install directory
+echo "Removing install directory..."
+rm -rf /opt/cbin
+
+echo "Uninstallation complete."
