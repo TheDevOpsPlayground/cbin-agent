@@ -33,9 +33,6 @@ func main() {
 		logrus.Fatalf("Failed to read configuration file: %v", err)
 	}
 
-	// Initialize logger
-	initLogger()
-
 	// Get server information
 	ip, hostname, err := getServerInfo()
 	if err != nil {
@@ -47,6 +44,9 @@ func main() {
 	if err := os.MkdirAll(serverDir, 0777); err != nil {
 		logrus.Fatalf("Failed to create server directory: %v", err)
 	}
+
+	// Initialize logger
+	initLogger(serverDir)
 
 	// Handle positional arguments (files to recycle) separately
 	if len(flag.Args()) > 0 {
