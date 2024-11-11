@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -43,6 +44,9 @@ func main() {
 
 	// Create unique server directory in recycle bin
 	serverDir := filepath.Join(config.RecycleBinDir, fmt.Sprintf("%s_%s", ip, hostname))
+	if err := os.MkdirAll(serverDir, os.ModePerm); err != nil {
+		logrus.Fatalf("Failed to create server directory: %v", err)
+	}
 
 	// Handle positional arguments (files to recycle) separately
 	if len(flag.Args()) > 0 {
