@@ -61,7 +61,7 @@ func moveFileToRecycleBin(file string, serverDir string, ip string, hostname str
 
 	// Create the date directory for today's date
 	dateDir := filepath.Join(serverDir, time.Now().Format("2006-01-02"))
-	os.MkdirAll(dateDir, os.ModePerm)
+	os.MkdirAll(dateDir, 0777)
 
 	var destPath string
 	if fileInfo.IsDir() {

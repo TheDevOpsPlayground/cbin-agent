@@ -44,7 +44,7 @@ func main() {
 
 	// Create unique server directory in recycle bin
 	serverDir := filepath.Join(config.RecycleBinDir, fmt.Sprintf("%s_%s", ip, hostname))
-	if err := os.MkdirAll(serverDir, os.ModePerm); err != nil {
+	if err := os.MkdirAll(serverDir, 0777); err != nil {
 		logrus.Fatalf("Failed to create server directory: %v", err)
 	}
 

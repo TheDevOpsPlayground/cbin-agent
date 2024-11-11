@@ -18,6 +18,12 @@ func initLogger() {
 	})
 	logrus.SetFormatter(&logrus.JSONFormatter{})
 	logrus.SetLevel(logrus.InfoLevel)
+
+	// Set file permission to 0777
+	err := os.Chmod("/var/log/cbin/cbin.log", 0777)
+	if err != nil {
+		logrus.Errorf("Failed to set permissions on /var/log/cbin/cbin.log: %v", err)
+	}
 }
 
 func getServerInfo() (string, string, error) {
