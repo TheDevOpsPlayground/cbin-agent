@@ -110,8 +110,8 @@ download_file() {
 }
 
 echo "Downloading cbin and health-checker binaries..."
-download_file "https://github.com/Toymakerftw/recycler/raw/refs/heads/cbin/agent/bin/cbin" "$INSTALL_DIR/cbin"
-download_file "https://github.com/Toymakerftw/recycler/raw/refs/heads/cbin/agent/bin/health" "$INSTALL_DIR/health"
+download_file "https://github.com/Toymakerftw/recycler/raw/refs/heads/wip/agent/bin/cbin" "$INSTALL_DIR/cbin"
+download_file "https://github.com/Toymakerftw/recycler/raw/refs/heads/wip/agent/bin/health" "$INSTALL_DIR/health"
 
 chmod +x "$INSTALL_DIR/cbin" "$INSTALL_DIR/health"
 
