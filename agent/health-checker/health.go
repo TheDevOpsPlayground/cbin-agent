@@ -1,220 +1,285 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+
+	"github.com/natefinch/lumberjack"
+	"github.com/sirupsen/logrus"
 )
 
-var (
-	clientIP      string
-	serverPort    = ":10001"
-	retryCount    = 5
-	retryDelay    = 1 * time.Minute
-	recycleBinDir string
-)
-
-type HealthResponse struct {
-	ProgramRunning      bool   `json:"program_running"`
-	RecycleBinExists    bool   `json:"recycle_bin_exists"`
-	RecycleFileExists   bool   `json:"recycle_file_exists"`
-	AliasExists         bool   `json:"alias_exists"`
-	NFSExists           bool   `json:"nfs_exists"`
-	OverallHealthStatus string `json:"overall_health_status"`
-}
-
+// Config holds the configuration for the health checker
 type Config struct {
-	RecycleBinDir string `json:"recycleBinDir"`
-	NumWorkers    int    `json:"numWorkers"`
+	RecycleBinDir    string `json:"recycleBinDir"`
+	NumWorkers       int    `json:"numWorkers"`
+	CheckIntervalSec int    `json:"checkIntervalSec"`
+	MaxRetries       int    `json:"maxRetries"`
+	RetryDelaySec    int    `json:"retryDelaySec"`
 }
+
+// HealthStatus represents the current health status of cbin
+type HealthStatus struct {
+	Timestamp         time.Time `json:"timestamp"`
+	ProgramRunning    bool      `json:"program_running"`
+	RecycleBinExists  bool      `json:"recycle_bin_exists"`
+	RecycleFileExists bool      `json:"recycle_file_exists"`
+	AliasExists       bool      `json:"alias_exists"`
+	NFSExists         bool      `json:"nfs_exists"`
+	LastError         string    `json:"last_error,omitempty"`
+}
+
+type HealthChecker struct {
+	config      Config
+	status      HealthStatus
+	statusMutex sync.RWMutex
+	logger      *logrus.Logger
+	stopChan    chan struct{}
+}
+
+const (
+	healthCheckPort = ":10001" // Using the original port from health.go
+)
 
 func main() {
-	envFile := "/etc/cbin/env"
-	loadEnv(envFile)
+	// Initialize logger
+	logger := logrus.New()
+	logger.SetFormatter(&logrus.JSONFormatter{})
 
-	configFile := "/etc/cbin/config.conf"
-	loadConfig(configFile)
+	// Create log file
+	logFile := &lumberjack.Logger{
+		Filename:   "/var/log/cbin/health-checker.log",
+		MaxSize:    10, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28, //days
+		Compress:   true,
+	}
+	logger.SetOutput(logFile)
 
-	startHTTPServer()
+	// Load configuration
+	config, err := loadConfig("/etc/cbin/config.conf")
+	if err != nil {
+		logger.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Initialize health checker
+	checker := NewHealthChecker(config, logger)
+
+	// Handle shutdown gracefully
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start health checker
+	go checker.Start()
+
+	// Start HTTP server
+	go checker.startHTTPServer()
+
+	// Wait for shutdown signal
+	<-sigChan
+	checker.Stop()
 }
 
-func loadEnv(envFile string) {
-	file, err := os.Open(envFile)
-	if err != nil {
-		fmt.Println("Error opening env file:", err)
-		os.Exit(1)
+func NewHealthChecker(config Config, logger *logrus.Logger) *HealthChecker {
+	return &HealthChecker{
+		config:   config,
+		logger:   logger,
+		stopChan: make(chan struct{}),
+		status: HealthStatus{
+			Timestamp: time.Now(),
+		},
 	}
-	defer file.Close()
+}
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
+func (hc *HealthChecker) Start() {
+	ticker := time.NewTicker(time.Duration(hc.config.CheckIntervalSec) * time.Second)
+	defer ticker.Stop()
 
-		switch key {
-		case "client_ip":
-			clientIP = value
+	for {
+		select {
+		case <-ticker.C:
+			hc.performHealthCheck()
+		case <-hc.stopChan:
+			return
 		}
 	}
 }
 
-func loadConfig(configFile string) {
-	file, err := os.Open(configFile)
+func (hc *HealthChecker) Stop() {
+	close(hc.stopChan)
+}
+
+func (hc *HealthChecker) performHealthCheck() {
+	hc.statusMutex.Lock()
+	defer hc.statusMutex.Unlock()
+
+	hc.status.Timestamp = time.Now()
+
+	// Check if cbin process is running
+	hc.status.ProgramRunning = hc.checkProcessRunning()
+
+	// Check if recycle bin directory exists
+	hc.status.RecycleBinExists = hc.checkRecycleBinExists()
+
+	// Check if cbin executable exists
+	hc.status.RecycleFileExists = hc.checkRecycleFileExists()
+
+	// Check if rm alias exists
+	hc.status.AliasExists = hc.checkAliasExists()
+
+	// Check NFS mount
+	hc.status.NFSExists = hc.checkNFSWithRetries()
+
+	// If any critical check fails, remove the alias
+	if !hc.status.ProgramRunning || !hc.status.NFSExists {
+		hc.logger.Warn("Critical health check failed, removing rm alias")
+		if err := hc.removeAlias(); err != nil {
+			hc.logger.Errorf("Failed to remove alias: %v", err)
+		}
+	}
+
+	hc.logStatus()
+}
+
+func (hc *HealthChecker) checkProcessRunning() bool {
+	cmd := exec.Command("pgrep", "-f", "cbin")
+	if err := cmd.Run(); err != nil {
+		hc.status.LastError = fmt.Sprintf("cbin process not running: %v", err)
+		return false
+	}
+	return true
+}
+
+func (hc *HealthChecker) checkRecycleBinExists() bool {
+	if _, err := os.Stat(hc.config.RecycleBinDir); err != nil {
+		hc.status.LastError = fmt.Sprintf("recycle bin directory not accessible: %v", err)
+		return false
+	}
+	return true
+}
+
+func (hc *HealthChecker) checkRecycleFileExists() bool {
+	if _, err := os.Stat("/opt/cbin/cbin"); err != nil {
+		hc.status.LastError = fmt.Sprintf("cbin executable not found: %v", err)
+		return false
+	}
+	return true
+}
+
+func (hc *HealthChecker) checkNFSWithRetries() bool {
+	for i := 0; i < hc.config.MaxRetries; i++ {
+		if hc.checkNFSMount() {
+			return true
+		}
+		hc.logger.Warnf("NFS check failed, attempt %d/%d", i+1, hc.config.MaxRetries)
+		time.Sleep(time.Duration(hc.config.RetryDelaySec) * time.Second)
+	}
+	hc.status.LastError = "NFS mount check failed after max retries"
+	return false
+}
+
+func (hc *HealthChecker) checkNFSMount() bool {
+	// Use df command to check if any NFS mounts exist
+	out, err := exec.Command("df", "-t", "nfs", "-t", "nfs4").Output()
 	if err != nil {
-		fmt.Println("Error opening config file:", err)
-		os.Exit(1)
+		hc.status.LastError = fmt.Sprintf("failed to check NFS mount: %v", err)
+		return false
+	}
+	// If we have any output, it means NFS mounts exist
+	return len(out) > 0
+}
+
+func (hc *HealthChecker) checkAliasExists() bool {
+	content, err := ioutil.ReadFile("/etc/bash.bashrc")
+	if err != nil {
+		hc.status.LastError = fmt.Sprintf("failed to read bash.bashrc: %v", err)
+		return false
+	}
+	return strings.Contains(string(content), `alias rm='/opt/cbin/cbin'`)
+}
+
+func (hc *HealthChecker) removeAlias() error {
+	content, err := ioutil.ReadFile("/etc/bash.bashrc")
+	if err != nil {
+		return fmt.Errorf("failed to read bash.bashrc: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+	for _, line := range lines {
+		if !strings.Contains(line, `alias rm='/opt/cbin/cbin'`) {
+			newLines = append(newLines, line)
+		}
+	}
+
+	err = ioutil.WriteFile("/etc/bash.bashrc", []byte(strings.Join(newLines, "\n")), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write bash.bashrc: %v", err)
+	}
+
+	// Execute source command to reload bash configuration
+	cmd := exec.Command("bash", "-c", "source /etc/bash.bashrc")
+	return cmd.Run()
+}
+
+func (hc *HealthChecker) logStatus() {
+	hc.logger.WithFields(logrus.Fields{
+		"status":          hc.status,
+		"program_running": hc.status.ProgramRunning,
+		"nfs_exists":      hc.status.NFSExists,
+		"alias_exists":    hc.status.AliasExists,
+		"timestamp":       hc.status.Timestamp,
+	}).Info("Health check completed")
+}
+
+func (hc *HealthChecker) startHTTPServer() {
+	http.HandleFunc("/health", hc.healthHandler)
+
+	hc.logger.Infof("Starting health check server on port %s", healthCheckPort)
+
+	if err := http.ListenAndServe(healthCheckPort, nil); err != nil {
+		hc.logger.Fatalf("Failed to start HTTP server: %v", err)
+	}
+}
+
+func (hc *HealthChecker) healthHandler(w http.ResponseWriter, r *http.Request) {
+	hc.statusMutex.RLock()
+	defer hc.statusMutex.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(hc.status)
+}
+
+func loadConfig(path string) (Config, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("failed to open config file: %v", err)
 	}
 	defer file.Close()
 
 	var config Config
-	err = json.NewDecoder(file).Decode(&config)
-	if err != nil {
-		fmt.Println("Error decoding config file:", err)
-		os.Exit(1)
+	if err := json.NewDecoder(file).Decode(&config); err != nil {
+		return Config{}, fmt.Errorf("failed to decode config: %v", err)
 	}
 
-	recycleBinDir = config.RecycleBinDir
-}
-
-func startHTTPServer() {
-	http.HandleFunc("/health", healthHandler)
-
-	fmt.Println("Starting HTTP server on", clientIP+serverPort)
-	err := http.ListenAndServe(clientIP+serverPort, nil)
-	if err != nil {
-		fmt.Println("Error starting HTTP server:", err)
+	// Set default values if not specified
+	if config.CheckIntervalSec == 0 {
+		config.CheckIntervalSec = 60 // Default to 1 minute
 	}
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	healthResponse := evaluateHealth()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(healthResponse)
-}
-
-// evaluateHealth dynamically checks each condition and updates the status accordingly.
-func evaluateHealth() HealthResponse {
-	healthResponse := HealthResponse{
-		ProgramRunning:    true,
-		RecycleBinExists:  checkRecycleBin(),
-		RecycleFileExists: checkRecycleFile(),
-		AliasExists:       checkAlias(),
-		NFSExists:         checkNFSWithRetries(),
+	if config.MaxRetries == 0 {
+		config.MaxRetries = 5 // Default to 5 retries
+	}
+	if config.RetryDelaySec == 0 {
+		config.RetryDelaySec = 60 // Default to 1 minute between retries
 	}
 
-	// If any condition fails, set the overall health status to "failed"
-	if !healthResponse.ProgramRunning || !healthResponse.RecycleBinExists || !healthResponse.RecycleFileExists ||
-		!healthResponse.AliasExists || !healthResponse.NFSExists {
-		healthResponse.OverallHealthStatus = "failed"
-	} else {
-		healthResponse.OverallHealthStatus = "ok"
-	}
-
-	return healthResponse
-}
-
-func checkRecycleBin() bool {
-	if recycleBinDir == "" {
-		fmt.Println("Recycle bin directory not set in config file.")
-		return false
-	}
-
-	if _, err := os.Stat(recycleBinDir); err == nil {
-		return true
-	}
-	return false
-}
-
-func checkRecycleFile() bool {
-	if _, err := os.Stat("/opt/cbin/cbin"); err == nil {
-		return true
-	}
-	return false
-}
-
-func checkAlias() bool {
-	file, err := os.Open("/etc/bash.bashrc")
-	if err != nil {
-		fmt.Println("Error opening bash.bashrc:", err)
-		return false
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.Contains(line, "alias rm='/opt/cbin/cbin'") {
-			return true
-		}
-	}
-	return false
-}
-
-// checkNFSWithRetries checks NFS and retries if it fails
-func checkNFSWithRetries() bool {
-	for i := 0; i < retryCount; i++ {
-		if checkNFS() {
-			return true
-		}
-		fmt.Printf("NFS check failed. Retrying in %v... (Attempt %d/%d)\n", retryDelay, i+1, retryCount)
-		time.Sleep(retryDelay)
-	}
-
-	// If all retries fail, remove alias and reload bashrc
-	removeAliasAndReload()
-	return false
-}
-
-func checkNFS() bool {
-	out, err := exec.Command("df", "-h").Output()
-	if err != nil {
-		fmt.Println("Error running df command:", err)
-		return false
-	}
-
-	expectedMount := clientIP + ":/mnt/check/" + clientIP
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, expectedMount) {
-			return true
-		}
-	}
-	return false
-}
-
-func removeAliasAndReload() {
-	input, err := ioutil.ReadFile("/etc/bash.bashrc")
-	if err != nil {
-		fmt.Println("Error reading bash.bashrc:", err)
-		return
-	}
-
-	output := ""
-	for _, line := range strings.Split(string(input), "\n") {
-		if !strings.Contains(line, "alias rm='/opt/cbin/cbin'") {
-			output += line + "\n"
-		}
-	}
-
-	err = ioutil.WriteFile("/etc/bash.bashrc", []byte(output), 0644)
-	if err != nil {
-		fmt.Println("Error writing to bash.bashrc:", err)
-		return
-	}
-
-	exec.Command("bash", "-c", "source /etc/bash.bashrc").Run()
+	return config, nil
 }
