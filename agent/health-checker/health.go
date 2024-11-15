@@ -53,6 +53,7 @@ func main() {
 	// Initialize logger
 	logger := logrus.New()
 	logger.SetFormatter(&logrus.JSONFormatter{})
+	logger.SetLevel(logrus.DebugLevel)
 
 	// Create log file
 	logFile := &lumberjack.Logger{
@@ -191,6 +192,7 @@ func (hc *HealthChecker) checkNFSMount() bool {
 	out, err := exec.Command("df", "-t", "nfs", "-t", "nfs4").Output()
 	if err != nil {
 		hc.status.LastError = fmt.Sprintf("failed to check NFS mount: %v", err)
+		hc.logger.Errorf("Failed to check NFS mount: %v", err)
 		return false
 	}
 	// If we have any output, it means NFS mounts exist
@@ -201,9 +203,18 @@ func (hc *HealthChecker) checkAliasExists() bool {
 	content, err := ioutil.ReadFile("/etc/bash.bashrc")
 	if err != nil {
 		hc.status.LastError = fmt.Sprintf("failed to read bash.bashrc: %v", err)
+		hc.logger.Errorf("Failed to read bash.bashrc: %v", err)
 		return false
 	}
-	return strings.Contains(string(content), `alias rm='/usr/local/bin/cbin'`)
+
+	hc.logger.Debugf("Content of bash.bashrc: %s", string(content))
+
+	aliasLine := `alias rm='/usr/local/bin/cbin'`
+	exists := strings.Contains(string(content), aliasLine)
+
+	hc.logger.Debugf("Alias line '%s' exists: %v", aliasLine, exists)
+
+	return exists
 }
 
 func (hc *HealthChecker) removeAlias() error {
