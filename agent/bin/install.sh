@@ -117,7 +117,10 @@ echo "Creating default configuration file..."
 cat <<EOL > "$CONFIG_DIR/config.conf"
 {
   "recycleBinDir": "$MOUNT_POINT",
-  "numWorkers": 4
+    "numWorkers": 4,
+    "checkIntervalSec": 60,
+    "maxRetries": 5,
+    "retryDelaySec": 60
 }
 EOL
 chmod 644 "$CONFIG_DIR/config.conf"
@@ -140,13 +143,17 @@ EOL
 
 cat <<EOL > "$HEALTHCHECKERSYSTEMD_FILE"
 [Unit]
-Description=Recycler Health Checker Service
+Description=CBIN Health Checker Service
 After=network.target
+Wants=network-online.target
 
 [Service]
+Type=simple
 ExecStart=$HEALTHCHECKER_PATH
+Restart=always
+RestartSec=10
 User=root
-Restart=on-failure
+Group=root
 
 [Install]
 WantedBy=multi-user.target
