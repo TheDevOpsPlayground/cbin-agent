@@ -167,7 +167,7 @@ func (hc *HealthChecker) checkRecycleBinExists() bool {
 }
 
 func (hc *HealthChecker) checkRecycleFileExists() bool {
-	if _, err := os.Stat("/opt/cbin/cbin"); err != nil {
+	if _, err := os.Stat("/usr/local/bin/cbin"); err != nil {
 		hc.status.LastError = fmt.Sprintf("cbin executable not found: %v", err)
 		return false
 	}
@@ -203,7 +203,7 @@ func (hc *HealthChecker) checkAliasExists() bool {
 		hc.status.LastError = fmt.Sprintf("failed to read bash.bashrc: %v", err)
 		return false
 	}
-	return strings.Contains(string(content), `alias rm='/opt/cbin/cbin'`)
+	return strings.Contains(string(content), `alias rm='/usr/local/bin/cbin'`)
 }
 
 func (hc *HealthChecker) removeAlias() error {
@@ -215,7 +215,7 @@ func (hc *HealthChecker) removeAlias() error {
 	lines := strings.Split(string(content), "\n")
 	var newLines []string
 	for _, line := range lines {
-		if !strings.Contains(line, `alias rm='/opt/cbin/cbin'`) {
+		if !strings.Contains(line, `alias rm='/usr/local/bin/cbin'`) {
 			newLines = append(newLines, line)
 		}
 	}
