@@ -174,6 +174,10 @@ else
     echo "Alias for rm command is already set in /etc/bash.bashrc"
 fi
 
+# Reload bash.bashrc
+echo "Reloading bash.bashrc..."
+source /etc/bash.bashrc
+
 # Completion message    
 echo "cbin - A centralized recycle bin for Linux servers."
 echo "--------------------------------------------------"

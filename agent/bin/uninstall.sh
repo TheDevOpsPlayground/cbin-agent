@@ -48,6 +48,10 @@ rm -rf /mnt/recyclebin
 echo "Removing alias from bash.bashrc..."
 sed -i '/alias rm/d' /etc/bash.bashrc
 
+# Reload bash.bashrc
+echo "Reloading bash.bashrc..."
+source /etc/bash.bashrc
+
 # Remove NFS mount from /etc/fstab
 echo "Removing NFS mount from /etc/fstab..."
 sed -i '/nfs/d' /etc/fstab
