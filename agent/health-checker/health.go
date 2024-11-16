@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -43,6 +44,7 @@ type HealthChecker struct {
 	statusMutex sync.RWMutex
 	logger      *logrus.Logger
 	stopChan    chan struct{}
+	httpServer  *http.Server // Add this field
 }
 
 const (
@@ -115,7 +117,16 @@ func (hc *HealthChecker) Start() {
 }
 
 func (hc *HealthChecker) Stop() {
+	// Signal the health check goroutine to stop
 	close(hc.stopChan)
+
+	// Shutdown the HTTP server gracefully
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := hc.httpServer.Shutdown(ctx); err != nil {
+		hc.logger.Errorf("Error shutting down HTTP server: %v", err)
+	}
 }
 
 func (hc *HealthChecker) performHealthCheck() {
@@ -252,11 +263,19 @@ func (hc *HealthChecker) logStatus() {
 }
 
 func (hc *HealthChecker) startHTTPServer() {
-	http.HandleFunc("/health", hc.healthHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", hc.healthHandler)
+
+	hc.httpServer = &http.Server{
+		Addr:         healthCheckPort,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
 
 	hc.logger.Infof("Starting health check server on port %s", healthCheckPort)
 
-	if err := http.ListenAndServe(healthCheckPort, nil); err != nil {
+	if err := hc.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		hc.logger.Fatalf("Failed to start HTTP server: %v", err)
 	}
 }
@@ -265,8 +284,20 @@ func (hc *HealthChecker) healthHandler(w http.ResponseWriter, r *http.Request) {
 	hc.statusMutex.RLock()
 	defer hc.statusMutex.RUnlock()
 
+	// Set timeout header
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(hc.status)
+
+	// Check if context is done/canceled
+	select {
+	case <-r.Context().Done():
+		http.Error(w, "Request timeout", http.StatusGatewayTimeout)
+		return
+	default:
+		if err := json.NewEncoder(w).Encode(hc.status); err != nil {
+			http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
 }
 
 func loadConfig(path string) (Config, error) {
