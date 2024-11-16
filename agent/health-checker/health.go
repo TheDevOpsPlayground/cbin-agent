@@ -172,6 +172,16 @@ func (hc *HealthChecker) performBasicHealthCheck() {
 		}
 	}
 
+	// Check if all conditions are met and alias doesn't exist
+	if hc.status.ProgramRunning && hc.status.NFSExists && hc.status.RecycleBinExists && hc.status.RecycleFileExists && !hc.status.AliasExists {
+		hc.logger.Info("All conditions met, restoring rm alias")
+		if err := hc.addAlias(); err != nil {
+			hc.logger.Errorf("Failed to add alias: %v", err)
+		} else {
+			hc.status.AliasExists = true
+		}
+	}
+
 	hc.logStatus()
 }
 
@@ -292,6 +302,27 @@ func (hc *HealthChecker) removeAlias() error {
 	}
 
 	err = ioutil.WriteFile("/etc/bash.bashrc", []byte(strings.Join(newLines, "\n")), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write bash.bashrc: %v", err)
+	}
+
+	cmd := exec.Command("bash", "-c", "source /etc/bash.bashrc")
+	return cmd.Run()
+}
+
+func (hc *HealthChecker) addAlias() error {
+	content, err := ioutil.ReadFile("/etc/bash.bashrc")
+	if err != nil {
+		return fmt.Errorf("failed to read bash.bashrc: %v", err)
+	}
+
+	aliasLine := `alias rm='/usr/local/bin/cbin'`
+	if strings.Contains(string(content), aliasLine) {
+		return nil // Alias already exists
+	}
+
+	newContent := string(content) + "\n" + aliasLine
+	err = ioutil.WriteFile("/etc/bash.bashrc", []byte(newContent), 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write bash.bashrc: %v", err)
 	}
