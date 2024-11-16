@@ -18,7 +18,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Config holds the configuration for the health checker
 type Config struct {
 	RecycleBinDir    string `json:"recycleBinDir"`
 	NumWorkers       int    `json:"numWorkers"`
@@ -27,28 +26,33 @@ type Config struct {
 	RetryDelaySec    int    `json:"retryDelaySec"`
 }
 
-// HealthStatus represents the current health status of cbin
 type HealthStatus struct {
-	Timestamp         time.Time `json:"timestamp"`
-	ProgramRunning    bool      `json:"program_running"`
-	RecycleBinExists  bool      `json:"recycle_bin_exists"`
-	RecycleFileExists bool      `json:"recycle_file_exists"`
-	AliasExists       bool      `json:"alias_exists"`
-	NFSExists         bool      `json:"nfs_exists"`
-	LastError         string    `json:"last_error,omitempty"`
+	Timestamp          time.Time `json:"timestamp"`
+	ProgramRunning     bool      `json:"program_running"`
+	RecycleBinExists   bool      `json:"recycle_bin_exists"`
+	RecycleFileExists  bool      `json:"recycle_file_exists"`
+	AliasExists        bool      `json:"alias_exists"`
+	NFSExists          bool      `json:"nfs_exists"`
+	NFSCheckInProgress bool      `json:"nfs_check_in_progress"`
+	LastError          string    `json:"last_error,omitempty"`
+	LastNFSCheck       time.Time `json:"last_nfs_check"`
+	NFSCheckAttempts   int       `json:"nfs_check_attempts"`
+	NFSCheckMaxRetries int       `json:"nfs_check_max_retries"`
 }
 
 type HealthChecker struct {
-	config      Config
-	status      HealthStatus
-	statusMutex sync.RWMutex
-	logger      *logrus.Logger
-	stopChan    chan struct{}
-	httpServer  *http.Server // Add this field
+	config         Config
+	status         HealthStatus
+	statusMutex    sync.RWMutex
+	logger         *logrus.Logger
+	stopChan       chan struct{}
+	httpServer     *http.Server
+	nfsCheckTicker *time.Ticker
 }
 
 const (
-	healthCheckPort = ":10001" // Using the original port from health.go
+	healthCheckPort = ":10001"
+	nfsCheckTimeout = 5 * time.Second
 )
 
 func main() {
@@ -57,12 +61,12 @@ func main() {
 	logger.SetFormatter(&logrus.JSONFormatter{})
 	logger.SetLevel(logrus.DebugLevel)
 
-	// Create log file
+	// Create log file with rotation
 	logFile := &lumberjack.Logger{
 		Filename:   "/var/log/cbin/health-checker.log",
 		MaxSize:    10, // megabytes
 		MaxBackups: 3,
-		MaxAge:     28, //days
+		MaxAge:     28, // days
 		Compress:   true,
 	}
 	logger.SetOutput(logFile)
@@ -97,19 +101,25 @@ func NewHealthChecker(config Config, logger *logrus.Logger) *HealthChecker {
 		logger:   logger,
 		stopChan: make(chan struct{}),
 		status: HealthStatus{
-			Timestamp: time.Now(),
+			Timestamp:          time.Now(),
+			LastNFSCheck:       time.Now(),
+			NFSCheckMaxRetries: config.MaxRetries,
 		},
 	}
 }
 
 func (hc *HealthChecker) Start() {
+	// Start separate goroutine for NFS checks
+	go hc.startNFSChecker()
+
+	// Start regular health checks
 	ticker := time.NewTicker(time.Duration(hc.config.CheckIntervalSec) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			hc.performHealthCheck()
+			hc.performBasicHealthCheck()
 		case <-hc.stopChan:
 			return
 		}
@@ -117,7 +127,6 @@ func (hc *HealthChecker) Start() {
 }
 
 func (hc *HealthChecker) Stop() {
-	// Signal the health check goroutine to stop
 	close(hc.stopChan)
 
 	// Shutdown the HTTP server gracefully
@@ -129,28 +138,33 @@ func (hc *HealthChecker) Stop() {
 	}
 }
 
-func (hc *HealthChecker) performHealthCheck() {
+func (hc *HealthChecker) startNFSChecker() {
+	ticker := time.NewTicker(time.Duration(hc.config.CheckIntervalSec) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			hc.performNFSCheck()
+		case <-hc.stopChan:
+			return
+		}
+	}
+}
+
+func (hc *HealthChecker) performBasicHealthCheck() {
 	hc.statusMutex.Lock()
 	defer hc.statusMutex.Unlock()
 
 	hc.status.Timestamp = time.Now()
 
-	// Check if cbin process is running
+	// Perform quick checks
 	hc.status.ProgramRunning = hc.checkProcessRunning()
-
-	// Check if recycle bin directory exists
 	hc.status.RecycleBinExists = hc.checkRecycleBinExists()
-
-	// Check if cbin executable exists
 	hc.status.RecycleFileExists = hc.checkRecycleFileExists()
-
-	// Check if rm alias exists
 	hc.status.AliasExists = hc.checkAliasExists()
 
-	// Check NFS mount
-	hc.status.NFSExists = hc.checkNFSWithRetries()
-
-	// If any critical check fails, remove the alias
+	// Check if critical conditions are met
 	if !hc.status.ProgramRunning || !hc.status.NFSExists {
 		hc.logger.Warn("Critical health check failed, removing rm alias")
 		if err := hc.removeAlias(); err != nil {
@@ -159,6 +173,71 @@ func (hc *HealthChecker) performHealthCheck() {
 	}
 
 	hc.logStatus()
+}
+
+func (hc *HealthChecker) performNFSCheck() {
+	hc.statusMutex.Lock()
+	hc.status.NFSCheckInProgress = true
+	hc.status.NFSCheckAttempts = 0
+	hc.statusMutex.Unlock()
+
+	// Create context with timeout for NFS check
+	ctx, cancel := context.WithTimeout(context.Background(), nfsCheckTimeout)
+	defer cancel()
+
+	success := false
+	for i := 0; i < hc.config.MaxRetries; i++ {
+		hc.statusMutex.Lock()
+		hc.status.NFSCheckAttempts = i + 1
+		hc.statusMutex.Unlock()
+
+		if result := hc.checkNFSMount(); result {
+			success = true
+			break
+		} else {
+			// Update status immediately after each failed attempt
+			hc.statusMutex.Lock()
+			hc.status.NFSExists = false
+			hc.status.LastError = fmt.Sprintf("NFS mount check failed (attempt %d/%d)",
+				i+1, hc.config.MaxRetries)
+			hc.status.LastNFSCheck = time.Now()
+			hc.statusMutex.Unlock()
+
+			hc.logger.Warnf("NFS check failed, attempt %d/%d", i+1, hc.config.MaxRetries)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Duration(hc.config.RetryDelaySec) * time.Second):
+			continue
+		}
+	}
+
+	hc.statusMutex.Lock()
+	hc.status.NFSExists = success
+	hc.status.NFSCheckInProgress = false
+	hc.status.LastNFSCheck = time.Now()
+	if !success {
+		hc.status.LastError = fmt.Sprintf("NFS mount check failed after %d attempts",
+			hc.config.MaxRetries)
+	} else {
+		hc.status.LastError = ""
+	}
+	hc.statusMutex.Unlock()
+}
+
+func (hc *HealthChecker) checkNFSMount() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "df", "-t", "nfs", "-t", "nfs4")
+	out, err := cmd.Output()
+	if err != nil {
+		hc.logger.Errorf("Failed to check NFS mount: %v", err)
+		return false
+	}
+	return len(out) > 0
 }
 
 func (hc *HealthChecker) checkProcessRunning() bool {
@@ -186,30 +265,6 @@ func (hc *HealthChecker) checkRecycleFileExists() bool {
 	return true
 }
 
-func (hc *HealthChecker) checkNFSWithRetries() bool {
-	for i := 0; i < hc.config.MaxRetries; i++ {
-		if hc.checkNFSMount() {
-			return true
-		}
-		hc.logger.Warnf("NFS check failed, attempt %d/%d", i+1, hc.config.MaxRetries)
-		time.Sleep(time.Duration(hc.config.RetryDelaySec) * time.Second)
-	}
-	hc.status.LastError = "NFS mount check failed after max retries"
-	return false
-}
-
-func (hc *HealthChecker) checkNFSMount() bool {
-	// Use df command to check if any NFS mounts exist
-	out, err := exec.Command("df", "-t", "nfs", "-t", "nfs4").Output()
-	if err != nil {
-		hc.status.LastError = fmt.Sprintf("failed to check NFS mount: %v", err)
-		hc.logger.Errorf("Failed to check NFS mount: %v", err)
-		return false
-	}
-	// If we have any output, it means NFS mounts exist
-	return len(out) > 0
-}
-
 func (hc *HealthChecker) checkAliasExists() bool {
 	content, err := ioutil.ReadFile("/etc/bash.bashrc")
 	if err != nil {
@@ -218,14 +273,8 @@ func (hc *HealthChecker) checkAliasExists() bool {
 		return false
 	}
 
-	hc.logger.Debugf("Content of bash.bashrc: %s", string(content))
-
 	aliasLine := `alias rm='/usr/local/bin/cbin'`
-	exists := strings.Contains(string(content), aliasLine)
-
-	hc.logger.Debugf("Alias line '%s' exists: %v", aliasLine, exists)
-
-	return exists
+	return strings.Contains(string(content), aliasLine)
 }
 
 func (hc *HealthChecker) removeAlias() error {
@@ -247,19 +296,8 @@ func (hc *HealthChecker) removeAlias() error {
 		return fmt.Errorf("failed to write bash.bashrc: %v", err)
 	}
 
-	// Execute source command to reload bash configuration
 	cmd := exec.Command("bash", "-c", "source /etc/bash.bashrc")
 	return cmd.Run()
-}
-
-func (hc *HealthChecker) logStatus() {
-	hc.logger.WithFields(logrus.Fields{
-		"status":          hc.status,
-		"program_running": hc.status.ProgramRunning,
-		"nfs_exists":      hc.status.NFSExists,
-		"alias_exists":    hc.status.AliasExists,
-		"timestamp":       hc.status.Timestamp,
-	}).Info("Health check completed")
 }
 
 func (hc *HealthChecker) startHTTPServer() {
@@ -282,22 +320,27 @@ func (hc *HealthChecker) startHTTPServer() {
 
 func (hc *HealthChecker) healthHandler(w http.ResponseWriter, r *http.Request) {
 	hc.statusMutex.RLock()
-	defer hc.statusMutex.RUnlock()
+	status := hc.status // Create a copy of the status
+	hc.statusMutex.RUnlock()
 
-	// Set timeout header
 	w.Header().Set("Content-Type", "application/json")
 
-	// Check if context is done/canceled
-	select {
-	case <-r.Context().Done():
-		http.Error(w, "Request timeout", http.StatusGatewayTimeout)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		http.Error(w, fmt.Sprintf("Error encoding response: %v", err),
+			http.StatusInternalServerError)
 		return
-	default:
-		if err := json.NewEncoder(w).Encode(hc.status); err != nil {
-			http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
-			return
-		}
 	}
+}
+
+func (hc *HealthChecker) logStatus() {
+	hc.logger.WithFields(logrus.Fields{
+		"status":             hc.status,
+		"program_running":    hc.status.ProgramRunning,
+		"nfs_exists":         hc.status.NFSExists,
+		"alias_exists":       hc.status.AliasExists,
+		"timestamp":          hc.status.Timestamp,
+		"nfs_check_attempts": hc.status.NFSCheckAttempts,
+	}).Info("Health check completed")
 }
 
 func loadConfig(path string) (Config, error) {
