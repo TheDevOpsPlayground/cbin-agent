@@ -118,97 +118,251 @@ def variables(request):
     env_vars = {key: os.getenv(key) for key in os.environ.keys()}
     return render(request, 'variables.html', {'env_vars': env_vars})
 
-def run_command(command):
-    """
-    Run a shell command and handle errors, returning the output or error message.
-    """
-    try:
-        result = subprocess.run(command, check=True, shell=True, capture_output=True, text=True)
-        return result.stdout
-    except subprocess.CalledProcessError as e:
-        return f"Error running command: {command}\n{e.stderr}"
+import subprocess
+import shlex
 
+def run_command(command):
+   """
+   Run a shell command with sudo, capturing output or error.
+   """
+   try:
+       # Use subprocess to run command with sudo
+       result = subprocess.run(
+           ['sudo'] + shlex.split(command), 
+           capture_output=True, 
+           text=True, 
+           check=True
+       )
+       return result.stdout.strip()
+   except subprocess.CalledProcessError as e:
+       return f"Error: {e.stderr.strip()}"
+   except Exception as e:
+       return f"Unexpected error: {str(e)}"
+#############issue-1 #################
 def check_export_exists(client_ip):
     """
     Check if the export rule for the given client IP exists in /etc/exports.
     """
-    export_rule = f"{BASE_DIR}/{client_ip} {client_ip}("
-    exports_file_path = "/etc/exports"
     try:
-        with open(exports_file_path, "r") as exports_file:
-            return any(line.strip().startswith(export_rule) for line in exports_file)
-    except IOError:
+        # Use run_command to read file contents with sudo
+        exports_content = run_command('cat /etc/exports')
+        
+        # More robust export rule detection
+        export_pattern = f"{BASE_DIR}/{client_ip}"
+        
+        # Check if any line contains the export pattern
+        return any(
+            export_pattern in line.strip() 
+            for line in exports_content.splitlines() 
+            if line.strip() and not line.strip().startswith('#')
+        )
+    except Exception:
         return False
 
+
+#############################
 def create_base_directory():
     """
     Create the base directory for NFS exports if it doesn't exist.
     """
-    if not os.path.exists(BASE_DIR):
-        result = run_command(f"sudo mkdir -p {BASE_DIR}")
-        return "Error" not in result
+    try:
+        # Ensure BASE_DIR exists with proper permissions
+        result = run_command(f"mkdir -p {BASE_DIR}")
+        run_command(f"sudo chmod 755 {BASE_DIR}")
+        return True
+    except Exception as e:
+        print(f"Base directory creation error: {str(e)}")
+        return False
+import os
+import subprocess
+import shlex
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG, 
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    filename='/tmp/nfs_setup.log')
+
+def run_command(command):
+    """
+    Run a shell command with comprehensive logging.
+    """
+    try:
+        logging.info(f"Running command: {command}")
+        result = subprocess.run(
+            command, 
+            shell=True, 
+            capture_output=True, 
+            text=True, 
+            check=True
+        )
+        logging.info(f"Command output: {result.stdout}")
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Command failed: {command}")
+        logging.error(f"Error output: {e.stderr}")
+        return f"Error: {e.stderr}"
+    except Exception as e:
+        logging.error(f"Unexpected error: {str(e)}")
+        return f"Unexpected error: {str(e)}"
 
 def setup_client_directory(client_ip, fsid):
     """
     Create a directory for the client IP and configure the NFS export.
     """
-    client_dir = os.path.join(BASE_DIR, client_ip)
-    if not os.path.exists(client_dir):
-        result = run_command(f"sudo mkdir -p {client_dir}")
-        if "Error" in result:
-            return False
+    try:
+        # Use sudo to ensure proper permissions
+        client_dir = os.path.join(BASE_DIR, client_ip)
+        
+        # Create directory with sudo
+        run_command(f"sudo mkdir -p {client_dir}")
         run_command(f"sudo chmod 777 {client_dir}")
 
-    export_rule = f"{client_dir} {client_ip}(rw,sync,no_subtree_check,all_squash,anonuid=65534,anongid=65534,fsid={fsid})"
+        # Prepare export rule
+        export_rule = f"{client_dir} {client_ip}(rw,sync,no_subtree_check,all_squash,anonuid=65534,anongid=65534,fsid={fsid})"
 
-    try:
-        with open("/etc/exports", "a") as exports_file:
-            if all(line.strip() != export_rule for line in exports_file):
-                exports_file.write(f"{export_rule}\n")
-    except IOError:
+        # Append to exports file using sudo
+        append_cmd = f'sudo bash -c \'echo "{export_rule}" >> /etc/exports\''
+        run_command(append_cmd)
+
+        return True
+    except Exception as e:
+        print(f"Client directory setup error: {str(e)}")
         return False
-
-    return True
-
 def apply_nfs_exports():
     """
-    Apply NFS exports and restart the NFS server with error handling.
+    Apply NFS exports and restart the NFS server with comprehensive error handling.
     """
-    if "Error" in run_command("sudo exportfs -ua"):
+    try:
+        # Validate exports file
+        run_command("exportfs -v")
+        
+        # Reload exports
+        run_command("exportfs -ra")
+        
+        # Restart NFS service
+        run_command("sudo systemctl restart nfs-kernel-server")
+        
+        return True
+    except Exception as e:
+        print(f"NFS exports application error: {str(e)}")
         return False
-    if "Error" in run_command("sudo exportfs -ra"):
+
+
+import re
+import ipaddress
+
+def is_valid_ip(ip_address):
+    """
+    Validate if the given string is a valid IP address.
+    
+    Args:
+        ip_address (str): IP address to validate
+    
+    Returns:
+        bool: True if valid IP, False otherwise
+    """
+    try:
+        # Try parsing as IPv4
+        ipaddress.IPv4Address(ip_address)
+        
+        # Additional regex check for format
+        ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        if not re.match(ip_pattern, ip_address):
+            return False
+        
+        # Validate each octet is between 0-255
+        octets = ip_address.split('.')
+        return all(0 <= int(octet) <= 255 for octet in octets)
+    
+    except (ipaddress.AddressValueError, ValueError):
         return False
-    if "Error" in run_command("sudo systemctl restart nfs-kernel-server"):
-        return False
-    return True
+
+
+
+
+
+
+
+
+
+
 
 def add_agent(request):
     """
-    Handle the addition of a new agent.
+    Handle the addition of a new agent with detailed error handling.
     """
     if request.method == "POST":
-        ip_address = request.POST.get('ip_address')
+        ip_address = request.POST.get('ip_address', '').strip()
+        
+        # First, validate IP address
+        if not is_valid_ip(ip_address):
+            messages.error(request, f"Invalid IP address: {ip_address}")
+            return render(request, 'add_agent.html', {'form': AddAgentForm()})
         if ip_address:
-            # Check if the agent with the same IP address already exists
-            if Agent.objects.filter(ip_address=ip_address).exists():
-                messages.error(request, f"Agent with IP {ip_address} already exists.")
-            # Check if the export rule for this IP already exists
-            elif check_export_exists(ip_address):
-                messages.error(request, f"Export rule for IP {ip_address} already exists.")
-            # Create the base directory and client directory, then apply NFS exports
-            elif create_base_directory() and setup_client_directory(ip_address, fsid=1):
-                if apply_nfs_exports():
-                    # Add the agent to the database
-                    agent = Agent(ip_address=ip_address, status=0)
-                    agent.save()
-                    messages.success(request, f"Agent {ip_address} added successfully.")
-                    return redirect('view_agents')
-                else:
-                    messages.error(request, 'Failed to set up NFS or require sudo access.')
-            else:
-                messages.error(request, 'Failed to set up NFS or require sudo access.')
+            try:
+                # Check if agent exists
+                if Agent.objects.filter(ip_address=ip_address).exists():
+                    messages.error(request, f"Agent with IP {ip_address} already exists.")
+                    return render(request, 'add_agent.html', {'form': AddAgentForm()})
+
+                # Check if export exists
+                if check_export_exists(ip_address):
+                    messages.error(request, f"Export rule for IP {ip_address} already exists.")
+                    return render(request, 'add_agent.html', {'form': AddAgentForm()})
+
+                # Perform setup steps
+                if not create_base_directory():
+                    messages.error(request, 'Failed to create base directory.')
+                    return render(request, 'add_agent.html', {'form': AddAgentForm()})
+
+                if not setup_client_directory(ip_address, fsid=1):
+                    messages.error(request, 'Failed to setup client directory.')
+                    return render(request, 'add_agent.html', {'form': AddAgentForm()})
+
+                if not apply_nfs_exports():
+                    messages.error(request, 'Failed to apply NFS exports.')
+                    return render(request, 'add_agent.html', {'form': AddAgentForm()})
+
+                # If all steps succeed, save the agent
+                agent = Agent(ip_address=ip_address, status=0)
+                agent.save()
+                messages.success(request, f"Agent {ip_address} added successfully.")
+                return redirect('view_agents')
+
+            except Exception as e:
+                messages.error(request, f'Unexpected error: {str(e)}')
+                print(f"Unexpected error in add_agent: {str(e)}")
 
     return render(request, 'add_agent.html', {'form': AddAgentForm()})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def view_agents(request):
     """
@@ -217,33 +371,51 @@ def view_agents(request):
     agents = Agent.objects.all()
     return render(request, 'view_agents.html', {'agents': agents})
 
+
+
+
+
+#######################
+
+
+
 def remove_export_rule(client_ip):
-    """
-    Remove the export rule for the given client IP from /etc/exports.
-    """
-    export_rule = f"{BASE_DIR}/{client_ip} {client_ip}("
-    exports_file_path = "/etc/exports"
-    try:
-        with open(exports_file_path, "r") as exports_file:
-            exports_content = [line for line in exports_file if not line.strip().startswith(export_rule)]
-        with open(exports_file_path, "w") as exports_file:
-            exports_file.writelines(exports_content)
-        return True
-    except IOError:
-        return False
+   """
+   Remove the export rule for the given client IP from /etc/exports.
+   """
+   try:
+       export_rule = f"{BASE_DIR}/{client_ip} {client_ip}("
+       
+       # Use sudo to read and modify /etc/exports
+       read_cmd = f"sudo grep -v '{export_rule}' /etc/exports"
+       exports_content = run_command(read_cmd)
+       
+       # Write back filtered content using sudo
+       write_cmd = f"sudo tee /etc/exports > /dev/null << EOF\n{exports_content}\nEOF"
+       run_command(write_cmd)
+       
+       # Restart NFS server
+       run_command("sudo systemctl restart nfs-kernel-server")
+       
+       return True
+   except Exception as e:
+       print(f"Error removing export rule: {str(e)}")
+       return False
 
 def delete_agent(request, agent_id):
-    """
-    Handle the deletion of an agent and its corresponding NFS export rule.
-    """
-    try:
-        agent = Agent.objects.get(id=agent_id)
-        ip_address = agent.ip_address
-        if remove_export_rule(ip_address) and apply_nfs_exports():
-            agent.delete()
-            messages.success(request, 'Agent and corresponding export rule deleted successfully.')
-        else:
-            messages.error(request, 'Failed to remove export rule or require sudo access.')
-    except Agent.DoesNotExist:
-        messages.error(request, 'Agent not found.')
-    return redirect('view_agents')
+   """
+   Handle the deletion of an agent and its corresponding NFS export rule.
+   """
+   try:
+       agent = Agent.objects.get(id=agent_id)
+       ip_address = agent.ip_address
+       
+       if remove_export_rule(ip_address):
+           agent.delete()
+           messages.success(request, 'Agent and corresponding export rule deleted successfully.')
+       else:
+           messages.error(request, 'Failed to remove export rule or restart NFS server.')
+   except Agent.DoesNotExist:
+       messages.error(request, 'Agent not found.')
+   
+   return redirect('view_agents')
